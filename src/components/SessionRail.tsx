@@ -103,12 +103,6 @@ const SessionRail: React.FC<SessionRailProps> = ({
       </div>
 
       <div className="session-sidebar-footer">
-        {hasProject && activeProjectId && (
-          <button className="session-new-chat-footer-btn" onClick={onNewChat}>
-            <MessageSquarePlus size={14} />
-            <span>New Chat</span>
-          </button>
-        )}
       </div>
     </div>
   );

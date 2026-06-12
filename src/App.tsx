@@ -69,6 +69,7 @@ const App: React.FC = () => {
 
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
+  const activeSessionByProjectIdRef = useRef<Record<string, string>>({});
   const sessionRuntimeRef = useRef(sessionRuntime);
   sessionRuntimeRef.current = sessionRuntime;
   const sessionsRef = useRef(sessions);
@@ -266,16 +267,35 @@ const App: React.FC = () => {
         };
         persist(updated);
 
-        const sid = generateId();
-        const newSession: StoredSession = { id: sid, projectId: project.id, label: 'Chat 1', createdAt: Date.now() };
-        setSessions([newSession]);
-        setActiveSessionId(sid);
-        setSessionRuntime({});
+        // Preserve existing project chats; create Chat 1 only if none exist
+        const existingSessions = sessionsRef.current.filter((s) => s.projectId === project.id);
+        let targetSessionId: string | null = null;
+        if (existingSessions.length > 0) {
+          // Restore last active session for this project if tracked
+          const cached = activeSessionByProjectIdRef.current[project.id];
+          targetSessionId = (cached && existingSessions.some((s) => s.id === cached))
+            ? cached
+            : existingSessions[existingSessions.length - 1].id;
+          setActiveSessionId(targetSessionId);
+        } else {
+          const sid = generateId();
+          const newSession: StoredSession = { id: sid, projectId: project.id, label: 'Chat 1', createdAt: Date.now() };
+          setSessions((prev) => [...prev, newSession]);
+          setActiveSessionId(sid);
+          targetSessionId = sid;
+        }
+        if (targetSessionId) {
+          activeSessionByProjectIdRef.current[project.id] = targetSessionId;
+        }
 
         setGitStatus(null);
         refreshGitStatus();
 
-        await startAgentWithListeners(sid);
+        if (targetSessionId && !existingSessions.some((s) => s.id === targetSessionId)) {
+          await startAgentWithListeners(targetSessionId);
+        } else {
+          await reconcileAgentStatus();
+        }
 
         const unsubFs = window.electronAPI.onFileChanged((evt: FileChangeEvent) => {
           // TODO: attribute to correct session when multi-agent file tracking is implemented
@@ -355,6 +375,12 @@ const App: React.FC = () => {
         });
       }
 
+      // Track last active session per project
+      const session = sessionsRef.current.find((s) => s.id === sessionId);
+      if (session && activeProjectId) {
+        activeSessionByProjectIdRef.current[activeProjectId] = sessionId;
+      }
+
       const nextRuntime = sessionRuntime[sessionId];
       setActiveDiff(null);
       setActiveSessionId(sessionId);
@@ -394,6 +420,9 @@ const App: React.FC = () => {
     };
     setSessions((prev) => [...prev, newSession]);
     setActiveSessionId(sessionId);
+    if (activeProjectId) {
+      activeSessionByProjectIdRef.current[activeProjectId] = sessionId;
+    }
 
     setActiveFile(null); setSavedContent(''); setActiveDiff(null);
     await startAgentWithListeners(sessionId);
@@ -427,16 +456,31 @@ const App: React.FC = () => {
       current.activeProjectId = projectId;
       persist(current);
 
-      const sid = generateId();
-      const newSession: StoredSession = { id: sid, projectId, label: 'Chat 1', createdAt: Date.now() };
-      setSessions([newSession]);
-      setActiveSessionId(sid);
-      setSessionRuntime({});
+      // Preserve existing project chats; create Chat 1 only if none exist
+      const existingSessions = sessionsRef.current.filter((s) => s.projectId === projectId);
+      let targetSessionId: string | null = null;
+      if (existingSessions.length > 0) {
+        const cached = activeSessionByProjectIdRef.current[projectId];
+        targetSessionId = (cached && existingSessions.some((s) => s.id === cached))
+          ? cached
+          : existingSessions[existingSessions.length - 1].id;
+        setActiveSessionId(targetSessionId);
+      } else {
+        const sid = generateId();
+        const newSession: StoredSession = { id: sid, projectId, label: 'Chat 1', createdAt: Date.now() };
+        setSessions((prev) => [...prev, newSession]);
+        setActiveSessionId(sid);
+        targetSessionId = sid;
+      }
 
       setGitStatus(null);
       refreshGitStatus();
 
-      await startAgentWithListeners(sid);
+      if (targetSessionId && !existingSessions.some((s) => s.id === targetSessionId)) {
+        await startAgentWithListeners(targetSessionId);
+      } else {
+        await reconcileAgentStatus();
+      }
 
       const unsubFs = window.electronAPI.onFileChanged((evt: FileChangeEvent) => {
         // TODO: attribute to correct session when multi-agent file tracking is implemented
