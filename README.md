@@ -4,6 +4,8 @@ Desktop IDE for [Command Code CLI][cc] — an Electron + React + TypeScript app 
 
 [cc]: https://commandcode.ai/
 
+<!-- test comment 2 -->
+
 ## Features
 
 - **File Explorer** — browse project folders, open files for editing
