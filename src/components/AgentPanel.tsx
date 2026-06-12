@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { StopCircle, RotateCcw, Play, Clock, AlertTriangle, FilePlus, FileEdit, FileMinus, ChevronDown, ChevronRight, Check, X } from 'lucide-react';
+import { AlertTriangle, FilePlus, FileEdit, FileMinus, ChevronDown, ChevronRight, Check, X } from 'lucide-react';
 import { FileChangeEvent, AgentStatus } from '../types';
 
 interface AgentPanelProps {
@@ -14,12 +14,8 @@ interface AgentPanelProps {
   restartCount: number;
   hasProject: boolean;
   sessionLabel: string | null;
-  runningSessionId: string | null;
   onRenameSession: (sessionId: string, newLabel: string) => void;
   onWrite: (input: string) => void;
-  onStop: () => void;
-  onRestart: () => void;
-  onStart: () => void;
   onChangedFileClick: (evt: FileChangeEvent) => void;
   onAcceptFile: (filePath: string) => void;
   onRejectFile: (filePath: string) => void;
@@ -64,12 +60,8 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   restartCount,
   hasProject,
   sessionLabel,
-  runningSessionId,
   onRenameSession,
   onWrite,
-  onStop,
-  onRestart,
-  onStart,
   onChangedFileClick,
   onAcceptFile,
   onRejectFile,
@@ -86,12 +78,9 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   const inputLineRef = useRef('');
   const renamedRef = useRef(false);
 
-  const isOwnAgentRunning = runningSessionId === sessionId && status === 'running';
+  const isOwnAgentRunning = status === 'running';
   const isOwnAgentRunningRef = useRef(isOwnAgentRunning);
   isOwnAgentRunningRef.current = isOwnAgentRunning;
-  const otherChatRunning = !!runningSessionId && runningSessionId !== sessionId;
-  const isReadOnlyTranscript = !!terminalBuffer && !isOwnAgentRunning;
-  const [showStartHint, setShowStartHint] = useState(false);
 
   const statusLabel = status === 'running'
     ? 'Running'
@@ -101,8 +90,6 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     ? `Exited${exitCode !== null && exitCode >= 0 ? ` (${exitCode})` : ''}`
     : status === 'error'
     ? 'Error'
-    : isReadOnlyTranscript
-    ? 'Saved transcript'
     : 'Idle';
 
   const syncResize = useCallback(() => {
@@ -114,11 +101,11 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
       if (cols > 0 && rows > 0) {
         if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
         resizeTimerRef.current = setTimeout(() => {
-          window.electronAPI.resizeAgent(cols, rows);
+          window.electronAPI.resizeAgent(sessionId, cols, rows);
         }, 100);
       }
     } catch (_) {}
-  }, []);
+  }, [sessionId]);
 
   const initTerminal = useCallback(() => {
     if (!containerRef.current) return;
@@ -151,10 +138,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     setTimeout(() => syncResize(), 50);
 
     term.onData((data: string) => {
-      if (!isOwnAgentRunningRef.current) {
-        setShowStartHint(true);
-        return;
-      }
+      if (!isOwnAgentRunningRef.current) return;
       for (const ch of data) {
         if (ch === '\r') {
           const line = inputLineRef.current;
@@ -234,26 +218,6 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
             {isOwnAgentRunning && ' — PTY connected'}
           </span>
         </div>
-        <div className="agent-header-actions">
-          {isOwnAgentRunning && (
-            <>
-              <button className="agent-action-btn" onClick={onRestart} title="Restart Agent">
-                <RotateCcw size={13} />
-              </button>
-              <button className="agent-action-btn" onClick={onStop} title="Stop Agent">
-                <StopCircle size={13} />
-              </button>
-            </>
-          )}
-          {otherChatRunning && (
-            <span className="agent-blocked-hint">Agent running in another chat</span>
-          )}
-          {!runningSessionId && status !== 'running' && status !== 'error' && (
-            <button className="agent-action-btn agent-start-btn" onClick={onStart} title="Start Agent">
-              <Play size={13} />
-            </button>
-          )}
-        </div>
       </div>
 
       {error && (
@@ -316,27 +280,6 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
       )}
 
       <div className="agent-terminal-container" ref={containerRef} onClick={focusTerminal} />
-
-      {showStartHint && isReadOnlyTranscript && (
-        <div className="agent-start-hint-overlay" onClick={() => { setShowStartHint(false); onStart(); }}>
-          <Play size={14} />
-          <span>Start Agent to continue</span>
-        </div>
-      )}
-
-      {!terminalBuffer && status === 'idle' && !isOwnAgentRunning && (
-        <div className="agent-content">
-          <div className="agent-empty">
-            <div className="agent-empty-icon"><Clock size={32} /></div>
-            <p className="agent-empty-text">{hasProject ? 'Agent not running' : 'No folder open'}</p>
-            <p className="agent-empty-sub">
-              {hasProject
-                ? otherChatRunning ? 'Agent is running in another chat.' : 'Click Start Agent to start.'
-                : 'Open a folder to start the agent.'}
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

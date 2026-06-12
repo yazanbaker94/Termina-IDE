@@ -30,9 +30,7 @@ export interface AgentStartResult {
 }
 
 export interface AgentStatusResult {
-  running: boolean;
-  sessionId: string | null;
-  pid?: number | null;
+  running: Record<string, { pid?: number }>;
 }
 
 export interface FileChangeEvent {
@@ -115,7 +113,7 @@ export interface ElectronAPI {
   readFile: (filePath: string) => Promise<ReadFileResult>;
   saveFile: (filePath: string, content: string) => Promise<{ success: boolean }>;
   startAgent: (sessionId: string) => Promise<AgentStartResult>;
-  writeAgent: (input: string) => Promise<{ success: boolean }>;
+  writeAgent: (sessionId: string, input: string) => Promise<{ success: boolean }>;
   stopAgent: (sessionId?: string) => Promise<{ success: boolean; error?: string }>;
   restartAgent: (sessionId: string) => Promise<AgentStartResult>;
   getAgentStatus: () => Promise<AgentStatusResult>;
@@ -124,7 +122,7 @@ export interface ElectronAPI {
   onAgentError: (cb: (message: string) => void) => () => void;
   onFileChanged: (cb: (event: FileChangeEvent) => void) => () => void;
   getFileDiff: (sessionId: string, filePath: string) => Promise<FileDiff | null>;
-  resizeAgent: (cols: number, rows: number) => Promise<{ success: boolean }>;
+  resizeAgent: (sessionId: string, cols: number, rows: number) => Promise<{ success: boolean }>;
   getFileTree: () => Promise<FileNode | null>;
   revertFile: (sessionId: string, filePath: string) => Promise<RevertResult>;
   getGitStatus: () => Promise<GitStatus>;

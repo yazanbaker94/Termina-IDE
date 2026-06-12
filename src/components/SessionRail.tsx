@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageSquarePlus, FolderGit2, MessageSquare, Files, FolderOpen } from 'lucide-react';
+import { MessageSquarePlus, FolderGit2, MessageSquare, FolderOpen } from 'lucide-react';
 import { StoredProject, StoredSession } from '../data/store';
 import { SessionRuntimeState } from '../types';
 
@@ -9,10 +9,8 @@ interface SessionRailProps {
   activeProjectId: string | null;
   activeSessionId: string | null;
   hasProject: boolean;
-  runningSessionId: string | null;
   sessionRuntime: Record<string, SessionRuntimeState>;
   onNewChat: () => void;
-  onToggleFiles: () => void;
   onSelectSession: (sessionId: string) => void;
   onSelectProject: (project: StoredProject) => void;
   onOpenFolder: () => void;
@@ -31,10 +29,8 @@ const SessionRail: React.FC<SessionRailProps> = ({
   activeProjectId,
   activeSessionId,
   hasProject,
-  runningSessionId,
   sessionRuntime,
   onNewChat,
-  onToggleFiles,
   onSelectSession,
   onSelectProject,
   onOpenFolder,
@@ -47,9 +43,6 @@ const SessionRail: React.FC<SessionRailProps> = ({
         <button className="session-new-chat-btn" onClick={onNewChat} title="New Chat">
           <MessageSquarePlus size={16} />
           <span>New Chat</span>
-        </button>
-        <button className="session-sidebar-icon-btn" onClick={onToggleFiles} title="Toggle Files">
-          <Files size={15} />
         </button>
       </div>
 
@@ -82,7 +75,7 @@ const SessionRail: React.FC<SessionRailProps> = ({
                   {sessions.map((s) => {
                     const runtime = sessionRuntime[s.id];
                     const agentStatus = runtime?.agentStatus ?? 'idle';
-                    const isRunning = runningSessionId === s.id;
+                    const isRunning = agentStatus === 'running';
                     return (
                       <button
                         key={s.id}

@@ -874,72 +874,11 @@ body {
   color: var(--text-primary);
 }
 
-.agent-start-btn {
-  color: #a6e3a1;
-}
-
-.agent-start-btn:hover {
-  color: #a6e3a1;
-  background: rgba(166, 227, 161, 0.12);
-}
-
-.agent-content {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-
-.agent-empty {
-  text-align: center;
-}
-
-.agent-empty-icon {
-  color: var(--text-muted);
-  margin-bottom: 12px;
-}
-
-.agent-empty-text {
-  font-size: 13px;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-}
-
-.agent-empty-sub {
-  font-size: 11px;
-  color: var(--text-muted);
-  opacity: 0.6;
-}
-
 .agent-terminal-container {
   flex: 1;
   min-height: 0;
   overflow: hidden;
   position: relative;
-}
-
-.agent-start-hint-overlay {
-  position: absolute;
-  bottom: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: 6px;
-  background: var(--accent);
-  color: var(--bg-tertiary);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  z-index: 10;
-  transition: opacity 0.15s;
-}
-
-.agent-start-hint-overlay:hover {
-  opacity: 0.85;
 }
 
 .agent-terminal-container .xterm {

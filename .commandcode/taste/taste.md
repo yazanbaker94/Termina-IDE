@@ -35,3 +35,5 @@
 - Separate cleanup refs for filesystem watcher listeners vs agent terminal event listeners; do not mix fs:onFileChanged and agent:onData/onExit cleanup. Confidence: 0.75
 - Register agent terminal listeners (onAgentData, onAgentExit, onAgentError) before calling startAgent or restartAgent to prevent early terminal output from being dropped. Confidence: 0.75
 
+# product
+- Sessions and chats are runtime-only: do not persist chats, sessionRuntime, or terminalBuffer across app restarts. Only persist project data (projects list, activeProjectId) in localStorage. On startup, auto-open the active project but start with a fresh chat slate. Confidence: 0.85

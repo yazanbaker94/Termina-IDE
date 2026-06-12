@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
   saveFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:saveFile', filePath, content),
   startAgent: (sessionId: string) => ipcRenderer.invoke('agent:start', sessionId),
-  writeAgent: (input: string) => ipcRenderer.invoke('agent:write', input),
+  writeAgent: (sessionId: string, input: string) => ipcRenderer.invoke('agent:write', sessionId, input),
   stopAgent: (sessionId?: string) => ipcRenderer.invoke('agent:stop', sessionId),
   restartAgent: (sessionId: string) => ipcRenderer.invoke('agent:restart', sessionId),
   getAgentStatus: () => ipcRenderer.invoke('agent:getStatus'),
@@ -31,7 +31,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('fs:onFileChanged', handler);
   },
   getFileDiff: (sessionId: string, filePath: string) => ipcRenderer.invoke('diff:getFileDiff', sessionId, filePath),
-  resizeAgent: (cols: number, rows: number) => ipcRenderer.invoke('agent:resize', cols, rows),
+  resizeAgent: (sessionId: string, cols: number, rows: number) => ipcRenderer.invoke('agent:resize', sessionId, cols, rows),
   getFileTree: () => ipcRenderer.invoke('fs:getFileTree'),
   revertFile: (sessionId: string, filePath: string) => ipcRenderer.invoke('diff:revertFile', sessionId, filePath),
   getGitStatus: () => ipcRenderer.invoke('git:getStatus'),

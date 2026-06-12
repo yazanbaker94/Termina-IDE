@@ -8,9 +8,8 @@ import type { FSWatcher } from 'chokidar';
 
 let mainWindow: BrowserWindow | null = null;
 let rootPath: string | null = null;
-let agentPty: pty.IPty | null = null;
-let agentSessionId: string | null = null;
-let agentStopRequested = false;
+const agentPtys = new Map<string, pty.IPty>();
+const agentStopRequested = new Map<string, boolean>();
 let fileWatcher: FSWatcher | null = null;
 const sessionFileSnapshots = new Map<string, Map<string, string>>();
 
@@ -241,7 +240,6 @@ function resolveCommandCode(): { command: string; args: string[] } | null {
       return { command: lines[0].trim(), args: [] };
     }
   } catch {
-    // Not found via which/where
     return null;
   }
 
@@ -251,15 +249,10 @@ function resolveCommandCode(): { command: string; args: string[] } | null {
 function startAgent(sessionId: string): { success: boolean; error?: string } {
   if (!rootPath) return { success: false, error: 'No project folder is open.' };
 
-  if (agentPty) {
-    if (agentSessionId === sessionId) {
-      return { success: true };
-    }
-    return { success: false, error: 'Another agent is already running. Stop it before starting a new one.' };
+  if (agentPtys.has(sessionId)) {
+    return { success: true };
   }
 
-  agentStopRequested = false;
-  agentSessionId = sessionId;
   captureFileSnapshots(sessionId);
 
   const cols = 80;
@@ -267,7 +260,6 @@ function startAgent(sessionId: string): { success: boolean; error?: string } {
   const cmdInfo = resolveCommandCode();
 
   if (!cmdInfo) {
-    agentSessionId = null;
     return { success: false, error: 'Command Code CLI not found. Install it and make sure command-code is in your PATH.' };
   }
 
@@ -283,8 +275,9 @@ function startAgent(sessionId: string): { success: boolean; error?: string } {
     shellArgs = ['-c', `${cmdInfo.command} ${cmdInfo.args.join(' ')}`.trim()];
   }
 
+  let spawnedPty: pty.IPty;
   try {
-    agentPty = pty.spawn(shellCmd, shellArgs, {
+    spawnedPty = pty.spawn(shellCmd, shellArgs, {
       name: 'xterm-256color',
       cols,
       rows,
@@ -292,40 +285,49 @@ function startAgent(sessionId: string): { success: boolean; error?: string } {
       env: { ...process.env } as { [key: string]: string },
     });
   } catch (err: any) {
-    agentSessionId = null;
     return { success: false, error: `Failed to spawn agent: ${err.message}` };
   }
 
+  agentPtys.set(sessionId, spawnedPty);
+  agentStopRequested.set(sessionId, false);
+
   const owningSession = sessionId;
 
-  agentPty.onData((data: string) => {
+  spawnedPty.onData((data: string) => {
     sendToRenderer('agent:onData', { sessionId: owningSession, data });
   });
 
-  agentPty.onExit(({ exitCode }: { exitCode: number }) => {
-    if (!agentStopRequested) {
-      sendToRenderer('agent:onExit', { sessionId: owningSession, exitCode });
-    } else {
+  spawnedPty.onExit(({ exitCode }: { exitCode: number }) => {
+    const wasStopRequested = agentStopRequested.get(owningSession);
+    if (wasStopRequested) {
       sendToRenderer('agent:onExit', { sessionId: owningSession, exitCode: -1 });
+    } else {
+      sendToRenderer('agent:onExit', { sessionId: owningSession, exitCode });
     }
-    agentPty = null;
-    agentSessionId = null;
-    agentStopRequested = false;
+    agentPtys.delete(owningSession);
+    agentStopRequested.delete(owningSession);
   });
 
   return { success: true };
 }
 
-function stopAgent() {
-  if (agentPty) {
-    agentStopRequested = true;
+function stopAgent(sessionId: string) {
+  const p = agentPtys.get(sessionId);
+  if (p) {
+    agentStopRequested.set(sessionId, true);
     try {
-      agentPty.kill();
+      p.kill();
     } catch {
       // already dead
     }
-    agentPty = null;
-    agentSessionId = null;
+    agentPtys.delete(sessionId);
+    agentStopRequested.delete(sessionId);
+  }
+}
+
+function stopAllAgents() {
+  for (const sessionId of [...agentPtys.keys()]) {
+    stopAgent(sessionId);
   }
 }
 
@@ -392,7 +394,7 @@ function setupIPC() {
 
     if (result.canceled || !result.filePaths.length) return null;
 
-    stopAgent();
+    stopAllAgents();
     rootPath = result.filePaths[0];
     fileCount = 0;
     const tree = buildFileTree(rootPath);
@@ -431,54 +433,44 @@ function setupIPC() {
   });
 
   ipcMain.handle('agent:getStatus', async () => {
-    return {
-      running: !!agentPty,
-      sessionId: agentSessionId ?? null,
-      pid: agentPty ? (agentPty as any).pid ?? null : null,
-    };
+    const running: Record<string, { pid: number | null }> = {};
+    for (const [sessionId, p] of agentPtys) {
+      running[sessionId] = { pid: (p as any).pid ?? null };
+    }
+    return { running };
   });
 
   ipcMain.handle('agent:start', async (_event, sessionId: string) => {
     if (!rootPath) {
       return { success: false, error: 'No project folder is open.' };
     }
-    if (agentPty && agentSessionId && agentSessionId !== sessionId) {
-      return { success: false, error: 'Another agent is already running. Stop it first.' };
-    }
-    if (agentPty && agentSessionId === sessionId) {
-      return { success: true };
-    }
     return startAgent(sessionId);
   });
 
-  ipcMain.handle('agent:write', async (_event, input: string) => {
-    if (!agentPty) return { success: false };
-    agentPty.write(input);
+  ipcMain.handle('agent:write', async (_event, sessionId: string, input: string) => {
+    const p = agentPtys.get(sessionId);
+    if (!p) return { success: false };
+    p.write(input);
     return { success: true };
   });
 
-  ipcMain.handle('agent:stop', async (_event, sessionId?: string) => {
-    if (sessionId && agentSessionId && agentSessionId !== sessionId) {
-      return { success: false, error: 'Cannot stop another session\'s agent.' };
-    }
-    stopAgent();
+  ipcMain.handle('agent:stop', async (_event, sessionId: string) => {
+    stopAgent(sessionId);
     return { success: true };
   });
 
   ipcMain.handle('agent:restart', async (_event, sessionId: string) => {
-    if (agentPty && agentSessionId && agentSessionId !== sessionId) {
-      return { success: false, error: 'Another agent is running. You can only restart your own agent.' };
-    }
-    stopAgent();
+    stopAgent(sessionId);
     return startAgent(sessionId);
   });
 
-  ipcMain.handle('agent:resize', async (_event, cols: number, rows: number) => {
-    if (!agentPty) return { success: false };
+  ipcMain.handle('agent:resize', async (_event, sessionId: string, cols: number, rows: number) => {
+    const p = agentPtys.get(sessionId);
+    if (!p) return { success: false };
     if (!Number.isInteger(cols) || cols < 10 || cols > 500) return { success: false };
     if (!Number.isInteger(rows) || rows < 4 || rows > 200) return { success: false };
     try {
-      agentPty.resize(cols, rows);
+      p.resize(cols, rows);
       return { success: true };
     } catch {
       return { success: false };
@@ -603,7 +595,7 @@ function setupIPC() {
         return { success: false, error: 'Folder no longer exists.' };
       }
 
-      stopAgent();
+      stopAllAgents();
       rootPath = resolved;
       fileCount = 0;
       const tree = buildFileTree(rootPath);
@@ -650,7 +642,7 @@ function createWindow() {
   });
 
   mainWindow.on('closed', () => {
-    stopAgent();
+    stopAllAgents();
     stopFileWatcher();
     mainWindow = null;
   });

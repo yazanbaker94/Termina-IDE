@@ -1,24 +1,12 @@
 import React from 'react';
-import { FolderOpen, Play, Files } from 'lucide-react';
+import { FolderOpen, Files } from 'lucide-react';
 
 interface ToolbarProps {
   onOpenFolder: () => void;
-  onRunAgent: () => void;
   onToggleFiles: () => void;
-  agentDisabled: boolean;
-  agentRunning: boolean;
-  otherChatRunning?: boolean;
 }
 
-const Toolbar: React.FC<ToolbarProps> = ({ onOpenFolder, onRunAgent, onToggleFiles, agentDisabled, agentRunning, otherChatRunning }) => {
-  const runTitle = otherChatRunning
-    ? 'Agent is already running in another chat'
-    : agentDisabled
-    ? 'Open a folder to run Command Code'
-    : agentRunning
-    ? 'Agent is running'
-    : 'Run Command Code Agent';
-
+const Toolbar: React.FC<ToolbarProps> = ({ onOpenFolder, onToggleFiles }) => {
   return (
     <div className="toolbar">
       <div className="toolbar-left">
@@ -28,15 +16,6 @@ const Toolbar: React.FC<ToolbarProps> = ({ onOpenFolder, onRunAgent, onToggleFil
         <button className="toolbar-btn" onClick={onOpenFolder} title="Open Folder">
           <FolderOpen size={16} />
           <span>Open Folder</span>
-        </button>
-        <button
-          className="toolbar-btn"
-          onClick={onRunAgent}
-          disabled={agentDisabled || agentRunning || !!otherChatRunning}
-          title={runTitle}
-        >
-          <Play size={16} />
-          <span>Run Agent</span>
         </button>
       </div>
       <div className="toolbar-right">
