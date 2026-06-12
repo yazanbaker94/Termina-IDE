@@ -581,15 +581,12 @@ const App: React.FC = () => {
     try {
       const diff = await window.electronAPI.getFileDiff(activeSessionId, evt.path);
       if (diff) setActiveDiff(diff);
-      updateSessionRuntime(activeSessionId, {
-        changedFiles: (sessionRuntimeRef.current[activeSessionId]?.changedFiles ?? []).filter((f) => f.path !== evt.path),
-      });
     } catch (err) {
       console.error('Failed to get file diff:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [activeSessionId, updateSessionRuntime]);
+  }, [activeSessionId]);
 
   const handleCloseDiff = useCallback(() => setActiveDiff(null), []);
 
@@ -650,9 +647,10 @@ const App: React.FC = () => {
       changedFiles: (sessionRuntimeRef.current[activeSessionId]?.changedFiles ?? []).filter((f) => f.path !== filePath),
     });
     setActiveDiff(null);
+    refreshGitStatus();
     setSaveStatus(`Accepted ${filePath.split(/[\\/]/).pop() || filePath}`);
     setTimeout(() => setSaveStatus(''), 2000);
-  }, [activeSessionId, updateSessionRuntime]);
+  }, [activeSessionId, updateSessionRuntime, refreshGitStatus]);
 
   const handleRejectFile = useCallback(async (filePath: string) => {
     if (!activeSessionId) return;
@@ -668,9 +666,9 @@ const App: React.FC = () => {
       });
       setActiveDiff(null);
       refreshFileTree();
+      refreshGitStatus();
       setSaveStatus(`Rejected ${filePath.split(/[\\/]/).pop() || filePath}`);
       setTimeout(() => setSaveStatus(''), 2000);
-      refreshGitStatus();
     } catch (err) {
       console.error('Failed to reject file:', err);
     }
@@ -682,12 +680,15 @@ const App: React.FC = () => {
     const count = files.length;
     updateSessionRuntime(activeSessionId, { changedFiles: [] });
     setActiveDiff(null);
+    refreshGitStatus();
     setSaveStatus(`Accepted ${count} file${count !== 1 ? 's' : ''}`);
     setTimeout(() => setSaveStatus(''), 2000);
-  }, [activeSessionId, updateSessionRuntime]);
+  }, [activeSessionId, updateSessionRuntime, refreshGitStatus]);
 
+  const [rejectingAll, setRejectingAll] = useState(false);
   const handleRejectAll = useCallback(async () => {
     if (!activeSessionId) return;
+    setRejectingAll(true);
     const sessionId = activeSessionId;
     const files = [...(sessionRuntimeRef.current[sessionId]?.changedFiles ?? [])];
     let successCount = 0;
@@ -712,6 +713,7 @@ const App: React.FC = () => {
     setActiveDiff(null);
     refreshFileTree();
     refreshGitStatus();
+    setRejectingAll(false);
 
     if (failedPaths.length > 0) {
       setSaveStatus(`Rejected ${successCount} files, ${failedPaths.length} could not be reverted`);
@@ -886,6 +888,7 @@ const App: React.FC = () => {
                 onRejectFile={handleRejectFile}
                 onAcceptAll={handleAcceptAll}
                 onRejectAll={handleRejectAll}
+                rejectingAll={rejectingAll}
                 onStageFile={handleStageFile}
                 onUnstageFile={handleUnstageFile}
                 onCommitGit={handleCommitGit}

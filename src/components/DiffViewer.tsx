@@ -54,7 +54,7 @@ const DiffViewer: React.FC<DiffViewerProps> = ({ diff, onClose, onOpenFile, onRe
             <button
               className="panel-action-btn"
               onClick={() => onAcceptFile(diff.filePath)}
-              title="Accept file changes"
+              title="Accept File — keep changes, remove from review list"
             >
               <Check size={13} />
             </button>
@@ -62,7 +62,7 @@ const DiffViewer: React.FC<DiffViewerProps> = ({ diff, onClose, onOpenFile, onRe
           <button
             className="panel-action-btn"
             onClick={() => onRevertFile(diff.filePath)}
-            title="Reject file changes (restore snapshot)"
+            title="Reject File — restore file to pre-agent state"
           >
             <Undo2 size={13} />
           </button>
@@ -70,7 +70,7 @@ const DiffViewer: React.FC<DiffViewerProps> = ({ diff, onClose, onOpenFile, onRe
             <button
               className="panel-action-btn"
               onClick={() => onOpenFile(diff.filePath)}
-              title="Open file in editor"
+              title="Open File — open this file in the editor"
             >
               <ExternalLink size={13} />
             </button>
@@ -78,7 +78,7 @@ const DiffViewer: React.FC<DiffViewerProps> = ({ diff, onClose, onOpenFile, onRe
           <button
             className="panel-action-btn"
             onClick={onClose}
-            title="Close diff view"
+            title="Close — dismiss diff view"
           >
             <X size={13} />
           </button>

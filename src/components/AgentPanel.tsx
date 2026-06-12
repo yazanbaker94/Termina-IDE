@@ -26,6 +26,7 @@ interface AgentPanelProps {
   onRejectFile: (filePath: string) => void;
   onAcceptAll: () => void;
   onRejectAll: () => void;
+  rejectingAll?: boolean;
   onStageFile: (filePath: string) => void;
   onUnstageFile: (filePath: string) => void;
   onCommitGit: (message: string) => Promise<boolean>;
@@ -80,6 +81,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   onRejectFile,
   onAcceptAll,
   onRejectAll,
+  rejectingAll,
   onStageFile,
   onUnstageFile,
   onCommitGit,
@@ -315,15 +317,18 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
 
           {changesExpanded && (
             <div className="agent-changes-content">
+              {rejectingAll && (
+                <div className="agent-review-status">Rejecting changes...</div>
+              )}
               {hasAgentChanges && (
                 <div className="agent-changed-files">
                   <div className="agent-changed-title">
                     AGENT CHANGES
                     <div className="agent-changes-bulk">
-                      <button className="agent-review-btn accept" onClick={onAcceptAll} title="Accept All">
+                      <button className="agent-review-btn accept" onClick={onAcceptAll} title="Accept All" disabled={rejectingAll}>
                         <Check size={10} /> All
                       </button>
-                      <button className="agent-review-btn reject" onClick={onRejectAll} title="Reject All">
+                      <button className="agent-review-btn reject" onClick={onRejectAll} title="Reject All" disabled={rejectingAll}>
                         <X size={10} /> All
                       </button>
                     </div>
@@ -339,10 +344,10 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
                           <span className="agent-changed-icon">{changeIcon(evt.changeType)}</span>
                           <span className="agent-changed-name">{evt.path.split(/[\\/]/).pop() || evt.path}</span>
                         </button>
-                        <button className="agent-review-btn accept" onClick={() => onAcceptFile(evt.path)} title="Accept">
+                        <button className="agent-review-btn accept" onClick={() => onAcceptFile(evt.path)} title="Accept" disabled={rejectingAll}>
                           <Check size={10} />
                         </button>
-                        <button className="agent-review-btn reject" onClick={() => onRejectFile(evt.path)} title="Reject">
+                        <button className="agent-review-btn reject" onClick={() => onRejectFile(evt.path)} title="Reject" disabled={rejectingAll}>
                           <X size={10} />
                         </button>
                       </div>
