@@ -5,7 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
   readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
   saveFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:saveFile', filePath, content),
-  startAgent: (sessionId: string) => ipcRenderer.invoke('agent:start', sessionId),
+  startAgent: (sessionId: string, cwd: string) => ipcRenderer.invoke('agent:start', sessionId, cwd),
   writeAgent: (sessionId: string, input: string) => ipcRenderer.invoke('agent:write', sessionId, input),
   stopAgent: (sessionId?: string) => ipcRenderer.invoke('agent:stop', sessionId),
   restartAgent: (sessionId: string) => ipcRenderer.invoke('agent:restart', sessionId),

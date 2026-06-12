@@ -10,6 +10,7 @@ let mainWindow: BrowserWindow | null = null;
 let rootPath: string | null = null;
 const agentPtys = new Map<string, pty.IPty>();
 const agentStopRequested = new Map<string, boolean>();
+const sessionRoots = new Map<string, string>();
 let fileWatcher: FSWatcher | null = null;
 const sessionFileSnapshots = new Map<string, Map<string, string>>();
 
@@ -186,8 +187,7 @@ function stopFileWatcher() {
   }
 }
 
-function captureFileSnapshots(sessionId: string) {
-  if (!rootPath) return;
+function captureFileSnapshots(sessionId: string, cwd: string) {
   const snaps = new Map<string, string>();
   sessionFileSnapshots.set(sessionId, snaps);
 
@@ -220,7 +220,7 @@ function captureFileSnapshots(sessionId: string) {
     }
   };
 
-  walk(rootPath, 0);
+  walk(cwd, 0);
 }
 
 function resolveCommandCode(): { command: string; args: string[] } | null {
@@ -246,14 +246,14 @@ function resolveCommandCode(): { command: string; args: string[] } | null {
   return null;
 }
 
-function startAgent(sessionId: string): { success: boolean; error?: string } {
-  if (!rootPath) return { success: false, error: 'No project folder is open.' };
+function startAgent(sessionId: string, cwd: string): { success: boolean; error?: string } {
 
   if (agentPtys.has(sessionId)) {
     return { success: true };
   }
 
-  captureFileSnapshots(sessionId);
+  sessionRoots.set(sessionId, cwd);
+  captureFileSnapshots(sessionId, cwd);
 
   const cols = 80;
   const rows = 24;
@@ -281,10 +281,11 @@ function startAgent(sessionId: string): { success: boolean; error?: string } {
       name: 'xterm-256color',
       cols,
       rows,
-      cwd: rootPath,
+      cwd: cwd,
       env: { ...process.env } as { [key: string]: string },
     });
   } catch (err: any) {
+    sessionRoots.delete(sessionId);
     return { success: false, error: `Failed to spawn agent: ${err.message}` };
   }
 
@@ -306,6 +307,7 @@ function startAgent(sessionId: string): { success: boolean; error?: string } {
     }
     agentPtys.delete(owningSession);
     agentStopRequested.delete(owningSession);
+    sessionRoots.delete(owningSession);
   });
 
   return { success: true };
@@ -322,6 +324,7 @@ function stopAgent(sessionId: string) {
     }
     agentPtys.delete(sessionId);
     agentStopRequested.delete(sessionId);
+    sessionRoots.delete(sessionId);
   }
 }
 
@@ -394,7 +397,6 @@ function setupIPC() {
 
     if (result.canceled || !result.filePaths.length) return null;
 
-    stopAllAgents();
     rootPath = result.filePaths[0];
     fileCount = 0;
     const tree = buildFileTree(rootPath);
@@ -440,11 +442,8 @@ function setupIPC() {
     return { running };
   });
 
-  ipcMain.handle('agent:start', async (_event, sessionId: string) => {
-    if (!rootPath) {
-      return { success: false, error: 'No project folder is open.' };
-    }
-    return startAgent(sessionId);
+  ipcMain.handle('agent:start', async (_event, sessionId: string, cwd: string) => {
+    return startAgent(sessionId, cwd);
   });
 
   ipcMain.handle('agent:write', async (_event, sessionId: string, input: string) => {
@@ -460,8 +459,10 @@ function setupIPC() {
   });
 
   ipcMain.handle('agent:restart', async (_event, sessionId: string) => {
+    const cwd = sessionRoots.get(sessionId);
+    if (!cwd) return { success: false, error: 'Session root not found.' };
     stopAgent(sessionId);
-    return startAgent(sessionId);
+    return startAgent(sessionId, cwd);
   });
 
   ipcMain.handle('agent:resize', async (_event, sessionId: string, cols: number, rows: number) => {
@@ -485,9 +486,10 @@ function setupIPC() {
   });
 
   ipcMain.handle('diff:getFileDiff', async (_event, sessionId: string, filePath: string) => {
-    if (!rootPath) return null;
+    const cwd = sessionRoots.get(sessionId);
+    if (!cwd) return null;
 
-    const resolved = safeResolvePath(filePath);
+    const resolved = path.resolve(cwd, filePath);
     const ext = path.extname(resolved).toLowerCase();
     const language = getLanguage(ext);
     const fileName = path.basename(resolved);
@@ -518,9 +520,10 @@ function setupIPC() {
   });
 
   ipcMain.handle('diff:revertFile', async (_event, sessionId: string, filePath: string) => {
-    if (!rootPath) return { success: false, action: 'none', filePath, existedInSnapshot: false };
+    const cwd = sessionRoots.get(sessionId);
+    if (!cwd) return { success: false, action: 'none', filePath, existedInSnapshot: false };
 
-    const resolved = safeResolvePath(filePath);
+    const resolved = path.resolve(cwd, filePath);
     const snaps = sessionFileSnapshots.get(sessionId);
     const wasSnapshotted = snaps?.has(resolved) ?? false;
     const beforeContent = snaps?.get(resolved) ?? '';
@@ -595,7 +598,6 @@ function setupIPC() {
         return { success: false, error: 'Folder no longer exists.' };
       }
 
-      stopAllAgents();
       rootPath = resolved;
       fileCount = 0;
       const tree = buildFileTree(rootPath);

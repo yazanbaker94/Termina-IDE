@@ -112,7 +112,7 @@ export interface ElectronAPI {
   openFolder: () => Promise<OpenFolderResult | null>;
   readFile: (filePath: string) => Promise<ReadFileResult>;
   saveFile: (filePath: string, content: string) => Promise<{ success: boolean }>;
-  startAgent: (sessionId: string) => Promise<AgentStartResult>;
+  startAgent: (sessionId: string, cwd: string) => Promise<AgentStartResult>;
   writeAgent: (sessionId: string, input: string) => Promise<{ success: boolean }>;
   stopAgent: (sessionId?: string) => Promise<{ success: boolean; error?: string }>;
   restartAgent: (sessionId: string) => Promise<AgentStartResult>;

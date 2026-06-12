@@ -104,16 +104,8 @@ const App: React.FC = () => {
         setFilesDrawerVisible(false);
         agentHasRunRef.current = false;
 
-        const sid = generateId();
-        setSessions([{ id: sid, projectId: project.id, label: 'Chat 1', createdAt: Date.now() }]);
-        setActiveSessionId(sid);
-        setSessionRuntime({});
-
-        await reconcileAgentStatus();
         setGitStatus(null);
         refreshGitStatus();
-
-        await startAgentWithListeners(sid);
       } catch (err) {
         console.error('Failed to reopen project:', err);
       }
@@ -221,11 +213,11 @@ const App: React.FC = () => {
     agentListenersRef.current = [unsubData, unsubExit];
   }, [cleanAgentListeners, appendTerminalBuffer, updateSessionRuntime]);
 
-  const startAgentWithListeners = useCallback(async (sessionId: string) => {
+  const startAgentWithListeners = useCallback(async (sessionId: string, cwd: string) => {
     updateSessionRuntime(sessionId, { agentStatus: 'starting', error: '', changedFiles: [], restartCount: (sessionRuntimeRef.current[sessionId]?.restartCount ?? 0) + 1 });
     setupAgentListeners();
 
-    const result = await window.electronAPI.startAgent(sessionId);
+    const result = await window.electronAPI.startAgent(sessionId, cwd);
     if (!result.success) {
       updateSessionRuntime(sessionId, { agentStatus: 'error', error: result.error ?? 'Failed to start agent.' });
       return;
@@ -247,7 +239,8 @@ const App: React.FC = () => {
           return;
         }
 
-        cleanAllListeners();
+        fsListenerRef.current?.();
+        fsListenerRef.current = null;
         setProjectName(result.projectName ?? project.name);
         setRootPath(result.rootPath);
         setRootTree(result.tree ?? null);
@@ -265,37 +258,25 @@ const App: React.FC = () => {
             p.id === project.id ? { ...p, openedAt: Date.now() } : p,
           ),
         };
-        persist(updated);
+        setAppData(updated);
+        saveAppData(updated);
 
-        // Preserve existing project chats; create Chat 1 only if none exist
+        // Select last active chat for this project; don't auto-create
         const existingSessions = sessionsRef.current.filter((s) => s.projectId === project.id);
-        let targetSessionId: string | null = null;
         if (existingSessions.length > 0) {
-          // Restore last active session for this project if tracked
           const cached = activeSessionByProjectIdRef.current[project.id];
-          targetSessionId = (cached && existingSessions.some((s) => s.id === cached))
+          const targetId = (cached && existingSessions.some((s) => s.id === cached))
             ? cached
             : existingSessions[existingSessions.length - 1].id;
-          setActiveSessionId(targetSessionId);
+          setActiveSessionId(targetId);
+          activeSessionByProjectIdRef.current[project.id] = targetId;
+          await reconcileAgentStatus();
         } else {
-          const sid = generateId();
-          const newSession: StoredSession = { id: sid, projectId: project.id, label: 'Chat 1', createdAt: Date.now() };
-          setSessions((prev) => [...prev, newSession]);
-          setActiveSessionId(sid);
-          targetSessionId = sid;
-        }
-        if (targetSessionId) {
-          activeSessionByProjectIdRef.current[project.id] = targetSessionId;
+          setActiveSessionId(null);
         }
 
         setGitStatus(null);
         refreshGitStatus();
-
-        if (targetSessionId && !existingSessions.some((s) => s.id === targetSessionId)) {
-          await startAgentWithListeners(targetSessionId);
-        } else {
-          await reconcileAgentStatus();
-        }
 
         const unsubFs = window.electronAPI.onFileChanged((evt: FileChangeEvent) => {
           // TODO: attribute to correct session when multi-agent file tracking is implemented
@@ -360,7 +341,7 @@ const App: React.FC = () => {
         setTimeout(() => setSaveStatus(''), 3000);
       }
     },
-    [activeProjectId, hasProject, appData, persist, cleanAllListeners, refreshFileTree, refreshGitStatus, updateSessionRuntime, startAgentWithListeners],
+    [activeProjectId, hasProject, appData, refreshFileTree, refreshGitStatus, updateSessionRuntime, reconcileAgentStatus],
   );
 
   const handleSelectSession = useCallback(
@@ -425,12 +406,13 @@ const App: React.FC = () => {
     }
 
     setActiveFile(null); setSavedContent(''); setActiveDiff(null);
-    await startAgentWithListeners(sessionId);
-  }, [activeProjectId, sessions, updateSessionRuntime, startAgentWithListeners]);
+    await startAgentWithListeners(sessionId, rootPath ?? '');
+  }, [activeProjectId, rootPath, sessions, updateSessionRuntime, startAgentWithListeners]);
 
   const handleOpenFolder = useCallback(async () => {
     try {
-      cleanAllListeners();
+      fsListenerRef.current?.();
+      fsListenerRef.current = null;
       const result: OpenFolderResult | null = await window.electronAPI.openFolder();
       if (!result) return;
 
@@ -454,32 +436,21 @@ const App: React.FC = () => {
       }
 
       current.activeProjectId = projectId;
-      persist(current);
+      setAppData(current);
+      saveAppData(current);
 
-      // Preserve existing project chats; create Chat 1 only if none exist
+      // Select last active chat for this project; don't auto-create
       const existingSessions = sessionsRef.current.filter((s) => s.projectId === projectId);
-      let targetSessionId: string | null = null;
       if (existingSessions.length > 0) {
         const cached = activeSessionByProjectIdRef.current[projectId];
-        targetSessionId = (cached && existingSessions.some((s) => s.id === cached))
+        const targetId = (cached && existingSessions.some((s) => s.id === cached))
           ? cached
           : existingSessions[existingSessions.length - 1].id;
-        setActiveSessionId(targetSessionId);
-      } else {
-        const sid = generateId();
-        const newSession: StoredSession = { id: sid, projectId, label: 'Chat 1', createdAt: Date.now() };
-        setSessions((prev) => [...prev, newSession]);
-        setActiveSessionId(sid);
-        targetSessionId = sid;
-      }
-
-      setGitStatus(null);
-      refreshGitStatus();
-
-      if (targetSessionId && !existingSessions.some((s) => s.id === targetSessionId)) {
-        await startAgentWithListeners(targetSessionId);
-      } else {
+        setActiveSessionId(targetId);
+        activeSessionByProjectIdRef.current[projectId] = targetId;
         await reconcileAgentStatus();
+      } else {
+        setActiveSessionId(null);
       }
 
       const unsubFs = window.electronAPI.onFileChanged((evt: FileChangeEvent) => {
@@ -536,7 +507,7 @@ const App: React.FC = () => {
     } catch (err) {
       console.error('Failed to open folder:', err);
     }
-  }, [appData, persist, cleanAllListeners, refreshFileTree, refreshGitStatus, updateSessionRuntime, startAgentWithListeners]);
+  }, [appData, refreshFileTree, refreshGitStatus, updateSessionRuntime, reconcileAgentStatus]);
 
   const handleFileSelect = useCallback(async (node: FileNode) => {
     if (node.type === 'directory') return;
