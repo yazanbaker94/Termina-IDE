@@ -149,6 +149,8 @@ function startFileWatcher() {
     /[\\/]node_modules[\\/]/,
     /[\\/]dist[\\/]/,
     /[\\/]dist-electron[\\/]/,
+    /[\\/]build[\\/]/,
+    /[\\/]release[\\/]/,
     /[\\/]\.git[\\/]/,
     /[\\/]\.commandcode[\\/]/,
     /[\\/]__pycache__[\\/]/,

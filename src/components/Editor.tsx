@@ -33,9 +33,20 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
   onSave,
 }) => {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const onSaveRef = useRef(onSave);
+  onSaveRef.current = onSave;
 
-  const handleMount: OnMount = useCallback((editor) => {
+  const handleMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
+
+    editor.addAction({
+      id: 'command-code-save',
+      label: 'Save File',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+      run: () => {
+        onSaveRef.current();
+      },
+    });
   }, []);
 
   if (!file || !file.path) {
