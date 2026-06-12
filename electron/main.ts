@@ -284,6 +284,7 @@ function startAgent(sessionId: string, cwd: string): { success: boolean; error?:
       cwd: cwd,
       env: { ...process.env } as { [key: string]: string },
     });
+    console.log(`[agent] PTY started session=${sessionId} cwd=${cwd} pid=${(spawnedPty as any).pid}`);
   } catch (err: any) {
     sessionRoots.delete(sessionId);
     return { success: false, error: `Failed to spawn agent: ${err.message}` };
@@ -300,6 +301,7 @@ function startAgent(sessionId: string, cwd: string): { success: boolean; error?:
 
   spawnedPty.onExit(({ exitCode }: { exitCode: number }) => {
     const wasStopRequested = agentStopRequested.get(owningSession);
+    console.log(`[agent] PTY exit session=${owningSession} exitCode=${exitCode} stopRequested=${wasStopRequested} cwd=${cwd}`);
     if (wasStopRequested) {
       sendToRenderer('agent:onExit', { sessionId: owningSession, exitCode: -1 });
     } else {

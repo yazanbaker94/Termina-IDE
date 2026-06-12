@@ -175,10 +175,14 @@ const App: React.FC = () => {
       const runningIds = new Set(Object.keys(status.running));
       setSessionRuntime((prev) => {
         const next = { ...prev };
+        // Set running for sessions whose PTY is alive
+        for (const id of runningIds) {
+          const current = next[id] ?? defaultRuntime();
+          next[id] = { ...current, agentStatus: 'running', exitCode: null, error: '' };
+        }
+        // Mark sessions that think they're running/starting but PTY is gone as idle
         for (const [sid, rt] of Object.entries(next)) {
-          if (runningIds.has(sid)) {
-            next[sid] = { ...rt, agentStatus: 'running', exitCode: null, error: '' };
-          } else if (rt.agentStatus === 'running' || rt.agentStatus === 'starting') {
+          if (!runningIds.has(sid) && (rt.agentStatus === 'running' || rt.agentStatus === 'starting')) {
             next[sid] = { ...rt, agentStatus: 'idle' };
           }
         }
@@ -364,6 +368,9 @@ const App: React.FC = () => {
       setActiveDiff(null);
       setActiveSessionId(sessionId);
 
+      // Ensure runtime status is accurate for this session
+      reconcileAgentStatus();
+
       if (nextRuntime?.activeFilePath) {
         window.electronAPI.readFile(nextRuntime.activeFilePath).then((result) => {
           setActiveFile({
@@ -376,7 +383,7 @@ const App: React.FC = () => {
         setActiveFile(null); setSavedContent('');
       }
     },
-    [activeSessionId, sessionRuntime, updateSessionRuntime],
+    [activeSessionId, sessionRuntime, updateSessionRuntime, reconcileAgentStatus],
   );
 
   const handleNewChat = useCallback(async () => {
