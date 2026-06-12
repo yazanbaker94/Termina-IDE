@@ -87,6 +87,8 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   const renamedRef = useRef(false);
 
   const isOwnAgentRunning = runningSessionId === sessionId && status === 'running';
+  const isOwnAgentRunningRef = useRef(isOwnAgentRunning);
+  isOwnAgentRunningRef.current = isOwnAgentRunning;
   const otherChatRunning = !!runningSessionId && runningSessionId !== sessionId;
   const isReadOnlyTranscript = !!terminalBuffer && !isOwnAgentRunning;
   const [showStartHint, setShowStartHint] = useState(false);
@@ -149,7 +151,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     setTimeout(() => syncResize(), 50);
 
     term.onData((data: string) => {
-      if (!isOwnAgentRunning) {
+      if (!isOwnAgentRunningRef.current) {
         setShowStartHint(true);
         return;
       }
@@ -201,6 +203,12 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     if (containerRef.current) initTerminal();
     return () => { onXtermWriteReady(sessionId, null); destroyTerminal(); };
   }, [sessionId, restartCount]);
+
+  useEffect(() => {
+    if (isOwnAgentRunning) {
+      focusTerminal();
+    }
+  }, [isOwnAgentRunning, focusTerminal]);
 
   useEffect(() => {
     const handleResize = () => syncResize();
