@@ -45,7 +45,6 @@ const App: React.FC = () => {
 
   const [sessionRuntime, setSessionRuntime] = useState<Record<string, SessionRuntimeState>>({});
   const [runningAgentSessionId, setRunningAgentSessionId] = useState<string | null>(null);
-  const [pendingAutoStartSessionId, setPendingAutoStartSessionId] = useState<string | null>(null);
 
   const activeRuntime = activeSessionId ? sessionRuntime[activeSessionId] : null;
 
@@ -215,8 +214,34 @@ const App: React.FC = () => {
   }, [handleSave]);
 
   const handleRefreshTree = useCallback(() => refreshFileTree(), [refreshFileTree]);
-
   const handleToggleFiles = useCallback(() => setFilesDrawerVisible((v) => !v), []);
+
+  const handleStartAgent = useCallback(async (sessionId: string) => {
+    const runningId = runningAgentSessionIdRef.current;
+    if (runningId && runningId !== sessionId) {
+      const runningLabel = sessionsRef.current.find((s) => s.id === runningId)?.label ?? 'another chat';
+      const errorMsg = `Agent is already running in ${runningLabel}. Stop it before starting this chat.`;
+      updateSessionRuntime(sessionId, { error: errorMsg });
+      setSaveStatus(errorMsg);
+      setTimeout(() => setSaveStatus(''), 4000);
+      return;
+    }
+
+    updateSessionRuntime(sessionId, { agentStatus: 'starting', error: '', changedFiles: [], restartCount: (sessionRuntimeRef.current[sessionId]?.restartCount ?? 0) + 1 });
+
+    setupAgentListeners();
+
+    const result = await window.electronAPI.startAgent(sessionId);
+    if (!result.success) {
+      updateSessionRuntime(sessionId, { agentStatus: 'error', error: result.error ?? 'Failed to start agent.' });
+      cleanAgentListeners();
+      return;
+    }
+
+    updateSessionRuntime(sessionId, { agentStatus: 'running', exitCode: null });
+    setRunningAgentSessionId(sessionId);
+    await reconcileAgentStatus();
+  }, [setupAgentListeners, cleanAgentListeners, updateSessionRuntime, reconcileAgentStatus]);
 
   const handleSelectProject = useCallback(
     async (project: StoredProject) => {
@@ -372,8 +397,27 @@ const App: React.FC = () => {
     [activeSessionId, appData, sessionRuntime, persist, updateSessionRuntime],
   );
 
-  const handleNewChat = useCallback(() => {
+  const handleNewChat = useCallback(async () => {
     if (!activeProjectId) return;
+
+    // Stop any running agent first
+    const runningId = runningAgentSessionIdRef.current;
+    if (runningId) {
+      try { await window.electronAPI.stopAgent(runningId); } catch {}
+      cleanAgentListeners();
+      setRunningAgentSessionId(null);
+      updateSessionRuntime(runningId, { agentStatus: 'idle' });
+    }
+
+    // Snapshot old session
+    const prevId = activeSessionId;
+    if (prevId) {
+      updateSessionRuntime(prevId, {
+        activeFilePath: activeFileRef.current?.path ?? null,
+        activeFileName: activeFileRef.current?.name ?? null,
+        diffPath: activeDiffRef.current?.filePath ?? null,
+      });
+    }
 
     const sessionId = generateId();
     const projectChats = sessions.filter((s) => s.projectId === activeProjectId);
@@ -393,23 +437,9 @@ const App: React.FC = () => {
     setSavedContent('');
     setActiveDiff(null);
 
-    if (!runningAgentSessionIdRef.current) {
-      setPendingAutoStartSessionId(sessionId);
-    } else {
-      const runningLabel = sessionsRef.current.find((s) => s.id === runningAgentSessionIdRef.current)?.label ?? 'another chat';
-      updateSessionRuntime(sessionId, {
-        error: `Agent is already running in ${runningLabel}. Stop it before starting this chat.`,
-      });
-    }
-  }, [activeProjectId, appData, sessions, persist, updateSessionRuntime]);
-
-  useEffect(() => {
-    if (pendingAutoStartSessionId && activeSessionId === pendingAutoStartSessionId && hasProject) {
-      const sessionId = pendingAutoStartSessionId;
-      setPendingAutoStartSessionId(null);
-      handleStartAgent(sessionId);
-    }
-  }, [pendingAutoStartSessionId, activeSessionId, hasProject]);
+    // Auto-start the new chat
+    await handleStartAgent(sessionId);
+  }, [activeProjectId, appData, sessions, cleanAgentListeners, persist, updateSessionRuntime, handleStartAgent]);
 
   const handleOpenFolder = useCallback(async () => {
     try {
@@ -635,33 +665,6 @@ const App: React.FC = () => {
     }
   }, [refreshGitStatus, refreshFileTree]);
 
-  const handleStartAgent = useCallback(async (sessionId: string) => {
-    const runningId = runningAgentSessionIdRef.current;
-    if (runningId && runningId !== sessionId) {
-      const runningLabel = sessionsRef.current.find((s) => s.id === runningId)?.label ?? 'another chat';
-      const errorMsg = `Agent is already running in ${runningLabel}. Stop it before starting this chat.`;
-      updateSessionRuntime(sessionId, { error: errorMsg });
-      setSaveStatus(errorMsg);
-      setTimeout(() => setSaveStatus(''), 4000);
-      return;
-    }
-
-    updateSessionRuntime(sessionId, { agentStatus: 'starting', error: '', changedFiles: [], restartCount: (sessionRuntimeRef.current[sessionId]?.restartCount ?? 0) + 1 });
-
-    setupAgentListeners();
-
-    const result = await window.electronAPI.startAgent(sessionId);
-    if (!result.success) {
-      updateSessionRuntime(sessionId, { agentStatus: 'error', error: result.error ?? 'Failed to start agent.' });
-      cleanAgentListeners();
-      return;
-    }
-
-    updateSessionRuntime(sessionId, { agentStatus: 'running', exitCode: null });
-    setRunningAgentSessionId(sessionId);
-    await reconcileAgentStatus();
-  }, [setupAgentListeners, cleanAgentListeners, updateSessionRuntime, reconcileAgentStatus]);
-
   const handleWriteAgent = useCallback(async (input: string) => {
     const runningId = runningAgentSessionIdRef.current;
     const activeId = activeSessionIdRef.current;
@@ -712,7 +715,7 @@ const App: React.FC = () => {
     updateSessionRuntime(activeId, { agentStatus: 'running', exitCode: null });
     setRunningAgentSessionId(activeId);
     await reconcileAgentStatus();
-  }, [setupAgentListeners, cleanAgentListeners, updateSessionRuntime]);
+  }, [setupAgentListeners, cleanAgentListeners, updateSessionRuntime, reconcileAgentStatus]);
 
   const handleRenameSession = useCallback((sessionId: string, newLabel: string) => {
     setAppData((prev) => {
