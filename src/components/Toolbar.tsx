@@ -7,10 +7,13 @@ interface ToolbarProps {
   onToggleFiles: () => void;
   agentDisabled: boolean;
   agentRunning: boolean;
+  otherChatRunning?: boolean;
 }
 
-const Toolbar: React.FC<ToolbarProps> = ({ onOpenFolder, onRunAgent, onToggleFiles, agentDisabled, agentRunning }) => {
-  const runTitle = agentDisabled
+const Toolbar: React.FC<ToolbarProps> = ({ onOpenFolder, onRunAgent, onToggleFiles, agentDisabled, agentRunning, otherChatRunning }) => {
+  const runTitle = otherChatRunning
+    ? 'Agent is already running in another chat'
+    : agentDisabled
     ? 'Open a folder to run Command Code'
     : agentRunning
     ? 'Agent is running'
@@ -29,7 +32,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ onOpenFolder, onRunAgent, onToggleFil
         <button
           className="toolbar-btn"
           onClick={onRunAgent}
-          disabled={agentDisabled || agentRunning}
+          disabled={agentDisabled || agentRunning || !!otherChatRunning}
           title={runTitle}
         >
           <Play size={16} />

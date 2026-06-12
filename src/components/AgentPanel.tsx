@@ -2,17 +2,21 @@ import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { StopCircle, RotateCcw, Clock, AlertTriangle, FilePlus, FileEdit, FileMinus, RefreshCw, PlusCircle, MinusCircle } from 'lucide-react';
-import { AgentStatus, FileChangeEvent, GitStatus } from '../types';
+import { FileChangeEvent, GitStatus, AgentStatus } from '../types';
 
 interface AgentPanelProps {
+  sessionId: string;
   status: AgentStatus;
   exitCode: number | null;
   error: string;
   changedFiles: FileChangeEvent[];
+  terminalBuffer: string;
   restartCount: number;
   hasProject: boolean;
   gitStatus: GitStatus | null;
   sessionLabel: string | null;
+  runningSessionId: string | null;
+  onRenameSession: (sessionId: string, newLabel: string) => void;
   onWrite: (input: string) => void;
   onStop: () => void;
   onRestart: () => void;
@@ -33,15 +37,31 @@ function changeIcon(changeType: string) {
   }
 }
 
+function buildChatTitle(prompt: string): string {
+  const clean = prompt.replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
+  const words = clean.split(' ').filter((w) => w.length > 0);
+  const meaningful = words.slice(0, 7);
+  let title = meaningful.join(' ');
+  if (title.length > 42) {
+    title = title.slice(0, 42).replace(/\s\S*$/, '');
+  }
+  title = title.charAt(0).toUpperCase() + title.slice(1);
+  return title || 'Chat';
+}
+
 const AgentPanel: React.FC<AgentPanelProps> = ({
+  sessionId,
   status,
   exitCode,
   error,
   changedFiles,
+  terminalBuffer,
   restartCount,
   hasProject,
   gitStatus,
   sessionLabel,
+  runningSessionId,
+  onRenameSession,
   onWrite,
   onStop,
   onRestart,
@@ -58,6 +78,10 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [commitMessage, setCommitMessage] = useState('');
   const [committing, setCommitting] = useState(false);
+  const inputLineRef = useRef('');
+  const renamedRef = useRef(false);
+
+  const isOwnAgentRunning = status === 'running' && runningSessionId === sessionId;
 
   const handleCommit = useCallback(async () => {
     const trimmed = commitMessage.trim();
@@ -90,7 +114,6 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
 
   const initTerminal = useCallback(() => {
     if (!containerRef.current) return;
-
     containerRef.current.innerHTML = '';
 
     const term = new Terminal({
@@ -129,14 +152,43 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
-
     term.open(containerRef.current);
+
+    if (terminalBuffer) {
+      term.write(terminalBuffer);
+    }
 
     setTimeout(() => {
       syncResize();
     }, 50);
 
     term.onData((data: string) => {
+      for (const ch of data) {
+        if (ch === '\r') {
+          const line = inputLineRef.current;
+          inputLineRef.current = '';
+
+          if (
+            line.length > 0 &&
+            !renamedRef.current &&
+            sessionLabel &&
+            /^Chat \d+$/.test(sessionLabel)
+          ) {
+            const title = buildChatTitle(line);
+            if (title.length > 0 && title !== 'Chat') {
+              renamedRef.current = true;
+              onRenameSession(sessionId, title);
+            }
+          }
+        } else if (ch === '\x7f') {
+          if (inputLineRef.current.length > 0) {
+            inputLineRef.current = inputLineRef.current.slice(0, -1);
+          }
+        } else if (ch >= ' ') {
+          inputLineRef.current += ch;
+        }
+      }
+
       onWrite(data);
     });
 
@@ -144,9 +196,11 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     fitAddonRef.current = fitAddon;
 
     onXtermWriteReady((data: string) => {
-      term.write(data);
+      if (terminalRef.current) {
+        terminalRef.current.write(data);
+      }
     });
-  }, [onWrite, onXtermWriteReady, syncResize]);
+  }, [onWrite, onXtermWriteReady, syncResize, terminalBuffer, sessionId, sessionLabel, onRenameSession]);
 
   const destroyTerminal = useCallback(() => {
     if (terminalRef.current) {
@@ -159,53 +213,41 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   }, []);
 
   useEffect(() => {
-    if (status === 'running') {
-      if (terminalRef.current) {
-        destroyTerminal();
-      }
-      if (containerRef.current) {
-        initTerminal();
-      }
+    if (isOwnAgentRunning) {
+      if (terminalRef.current) destroyTerminal();
+      if (containerRef.current) initTerminal();
     }
-    if (status !== 'running' && terminalRef.current) {
+    if (!isOwnAgentRunning && !terminalBuffer && terminalRef.current) {
       destroyTerminal();
     }
-  }, [status, restartCount, initTerminal, destroyTerminal]);
+  }, [isOwnAgentRunning, terminalBuffer, restartCount]);
 
   useEffect(() => {
-    const handleResize = () => {
-      syncResize();
-    };
-
-    window.addEventListener('resize', handleResize);
-
-    const observer = new ResizeObserver(() => {
-      syncResize();
-    });
-
-    if (containerRef.current) {
-      observer.observe(containerRef.current);
+    if (!isOwnAgentRunning && terminalBuffer && !terminalRef.current && containerRef.current) {
+      initTerminal();
     }
+  }, [isOwnAgentRunning, terminalBuffer]);
 
+  useEffect(() => {
+    const handleResize = () => { syncResize(); };
+    window.addEventListener('resize', handleResize);
+    const observer = new ResizeObserver(() => { syncResize(); });
+    if (containerRef.current) observer.observe(containerRef.current);
     return () => {
       window.removeEventListener('resize', handleResize);
       observer.disconnect();
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
     };
-  }, [syncResize, status]);
+  }, [syncResize]);
 
-  useEffect(() => {
-    return () => {
-      destroyTerminal();
-    };
-  }, [destroyTerminal]);
+  useEffect(() => { return () => { destroyTerminal(); }; }, [destroyTerminal]);
 
   return (
     <div className="agent-panel">
       <div className="agent-header">
         <span className="agent-title">{sessionLabel ? sessionLabel : 'AGENT'}</span>
         <div className="agent-header-actions">
-          {status === 'running' && (
+          {isOwnAgentRunning && (
             <>
               <button className="agent-action-btn" onClick={onRestart} title="Restart Agent">
                 <RotateCcw size={13} />
@@ -215,7 +257,12 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
               </button>
             </>
           )}
-          {(status === 'exited' || status === 'idle') && (
+          {runningSessionId && runningSessionId !== sessionId && (
+            <span className="agent-blocked-hint">
+              Agent running in another chat
+            </span>
+          )}
+          {!runningSessionId && status !== 'running' && (
             <button className="agent-action-btn" onClick={onRestart} title="Restart Agent">
               <RotateCcw size={13} />
             </button>
@@ -266,21 +313,15 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
             {gitStatus.files.map((f) => {
               const hasStaged = f.staged;
               const hasUnstaged = f.unstaged;
-
               let statusClass = '';
               if (f.untracked) statusClass = 'git-status-untracked';
               else if (hasStaged && hasUnstaged) statusClass = 'git-status-modified';
               else if (hasStaged) statusClass = 'git-status-staged';
               else statusClass = 'git-status-modified';
-
               return (
                 <div key={f.path} className="git-file-row">
-                  <span className={`git-status ${statusClass}`}>
-                    {f.status}
-                  </span>
-                  <span className="agent-changed-name" title={f.path}>
-                    {f.gitPath}
-                  </span>
+                  <span className={`git-status ${statusClass}`}>{f.status}</span>
+                  <span className="agent-changed-name" title={f.path}>{f.gitPath}</span>
                   <div className="git-file-actions">
                     {(hasUnstaged || f.untracked) && (
                       <button className="git-action-btn" onClick={() => onStageFile(f.gitPath)} title="Stage">
@@ -308,11 +349,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
             placeholder="Commit message"
             value={commitMessage}
             onChange={(e) => setCommitMessage(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                handleCommit();
-              }
-            }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleCommit(); }}
           />
           <button
             className="git-commit-btn"
@@ -325,43 +362,28 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
         </div>
       )}
 
-      {status === 'running' && (
-        <div className="agent-terminal-container" ref={containerRef} />
-      )}
+      <div className="agent-terminal-container" ref={containerRef} />
 
-      {status === 'exited' && !error && (
-        <div className="agent-content">
-          <div className="agent-empty">
-            <div className="agent-empty-icon">
-              <Clock size={32} />
-            </div>
-            <p className="agent-empty-text">Agent exited{exitCode !== null && exitCode >= 0 ? ` with code ${exitCode}` : ''}</p>
-            <p className="agent-empty-sub">Click Restart to run again.</p>
-          </div>
-        </div>
-      )}
-
-      {status === 'exited' && error && (
-        <div className="agent-content">
-          <div className="agent-empty">
-            <p className="agent-empty-text">Agent failed to start</p>
-            <p className="agent-empty-sub">Click Restart to try again.</p>
-          </div>
-        </div>
-      )}
-
-      {status === 'idle' && !error && (
+      {status !== 'running' && !terminalBuffer && (
         <div className="agent-content">
           <div className="agent-empty">
             <div className="agent-empty-icon">
               <Clock size={32} />
             </div>
             <p className="agent-empty-text">
-              {hasProject ? 'Agent not running' : 'No folder open'}
+              {hasProject
+                ? status === 'exited'
+                  ? `Agent exited${exitCode !== null && exitCode >= 0 ? ` with code ${exitCode}` : ''}`
+                  : 'Agent not running'
+                : 'No folder open'}
             </p>
             <p className="agent-empty-sub">
               {hasProject
-                ? 'Click Run Agent to start.'
+                ? status === 'exited'
+                  ? 'Click Restart to run again.'
+                  : runningSessionId && runningSessionId !== sessionId
+                    ? 'Agent is running in another chat.'
+                    : 'Click Restart to start the agent.'
                 : 'Open a folder to start the agent.'}
             </p>
           </div>

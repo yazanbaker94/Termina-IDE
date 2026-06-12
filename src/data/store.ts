@@ -10,6 +10,8 @@ export interface StoredSession {
   projectId: string;
   label: string;
   createdAt: number;
+  updatedAt?: number;
+  renamedFromPrompt?: boolean;
 }
 
 export interface AppData {

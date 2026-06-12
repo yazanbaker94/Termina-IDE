@@ -27,6 +27,9 @@
 # ux-architecture
 - Design UI with agent/chat as the primary center experience, editor/diff as a secondary pane, collapsible file explorer as a right-side drawer, and a left session rail with project/session navigation (Codex-style layout). Confidence: 0.70
 
+# npm
+- When source code imports types from a package directly (e.g., monaco-editor), list it as an explicit dependency in package.json rather than relying on it being an indirect/peer dependency. Confidence: 0.70
+
 # electron
 - Separate cleanup refs for filesystem watcher listeners vs agent terminal event listeners; do not mix fs:onFileChanged and agent:onData/onExit cleanup. Confidence: 0.75
 - Register agent terminal listeners (onAgentData, onAgentExit, onAgentError) before calling startAgent or restartAgent to prevent early terminal output from being dropped. Confidence: 0.75

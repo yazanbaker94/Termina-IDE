@@ -5,17 +5,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
   readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
   saveFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:saveFile', filePath, content),
-  startAgent: () => ipcRenderer.invoke('agent:start'),
+  startAgent: (sessionId: string) => ipcRenderer.invoke('agent:start', sessionId),
   writeAgent: (input: string) => ipcRenderer.invoke('agent:write', input),
   stopAgent: () => ipcRenderer.invoke('agent:stop'),
-  restartAgent: () => ipcRenderer.invoke('agent:restart'),
-  onAgentData: (cb: (data: string) => void) => {
-    const handler = (_event: any, data: string) => cb(data);
+  restartAgent: (sessionId: string) => ipcRenderer.invoke('agent:restart', sessionId),
+  onAgentData: (cb: (data: { sessionId: string; data: string }) => void) => {
+    const handler = (_event: any, data: { sessionId: string; data: string }) => cb(data);
     ipcRenderer.on('agent:onData', handler);
     return () => ipcRenderer.removeListener('agent:onData', handler);
   },
-  onAgentExit: (cb: (exitCode: number) => void) => {
-    const handler = (_event: any, exitCode: number) => cb(exitCode);
+  onAgentExit: (cb: (data: { sessionId: string; exitCode: number }) => void) => {
+    const handler = (_event: any, data: { sessionId: string; exitCode: number }) => cb(data);
     ipcRenderer.on('agent:onExit', handler);
     return () => ipcRenderer.removeListener('agent:onExit', handler);
   },
@@ -29,10 +29,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('fs:onFileChanged', handler);
     return () => ipcRenderer.removeListener('fs:onFileChanged', handler);
   },
-  getFileDiff: (filePath: string) => ipcRenderer.invoke('diff:getFileDiff', filePath),
+  getFileDiff: (sessionId: string, filePath: string) => ipcRenderer.invoke('diff:getFileDiff', sessionId, filePath),
   resizeAgent: (cols: number, rows: number) => ipcRenderer.invoke('agent:resize', cols, rows),
   getFileTree: () => ipcRenderer.invoke('fs:getFileTree'),
-  revertFile: (filePath: string) => ipcRenderer.invoke('diff:revertFile', filePath),
+  revertFile: (sessionId: string, filePath: string) => ipcRenderer.invoke('diff:revertFile', sessionId, filePath),
   getGitStatus: () => ipcRenderer.invoke('git:getStatus'),
   stageFile: (filePath: string) => ipcRenderer.invoke('git:stageFile', filePath),
   unstageFile: (filePath: string) => ipcRenderer.invoke('git:unstageFile', filePath),

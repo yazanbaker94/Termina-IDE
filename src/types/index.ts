@@ -79,25 +79,47 @@ export interface OpenProjectPathResult {
   tree?: FileNode;
 }
 
-export type AgentStatus = 'idle' | 'running' | 'exited';
+export interface AgentDataEvent {
+  sessionId: string;
+  data: string;
+}
+
+export interface AgentExitEvent {
+  sessionId: string;
+  exitCode: number;
+}
+
+export type AgentStatus = 'idle' | 'starting' | 'running' | 'exited';
+
+export interface SessionRuntimeState {
+  agentStatus: AgentStatus;
+  exitCode: number | null;
+  error: string;
+  terminalBuffer: string;
+  changedFiles: FileChangeEvent[];
+  restartCount: number;
+  activeFilePath: string | null;
+  activeFileName: string | null;
+  diffPath: string | null;
+}
 
 export interface ElectronAPI {
   platform: string;
   openFolder: () => Promise<OpenFolderResult | null>;
   readFile: (filePath: string) => Promise<ReadFileResult>;
   saveFile: (filePath: string, content: string) => Promise<{ success: boolean }>;
-  startAgent: () => Promise<AgentStartResult>;
+  startAgent: (sessionId: string) => Promise<AgentStartResult>;
   writeAgent: (input: string) => Promise<{ success: boolean }>;
   stopAgent: () => Promise<{ success: boolean }>;
-  restartAgent: () => Promise<AgentStartResult>;
-  onAgentData: (cb: (data: string) => void) => () => void;
-  onAgentExit: (cb: (exitCode: number) => void) => () => void;
+  restartAgent: (sessionId: string) => Promise<AgentStartResult>;
+  onAgentData: (cb: (event: AgentDataEvent) => void) => () => void;
+  onAgentExit: (cb: (event: AgentExitEvent) => void) => () => void;
   onAgentError: (cb: (message: string) => void) => () => void;
   onFileChanged: (cb: (event: FileChangeEvent) => void) => () => void;
-  getFileDiff: (filePath: string) => Promise<FileDiff | null>;
+  getFileDiff: (sessionId: string, filePath: string) => Promise<FileDiff | null>;
   resizeAgent: (cols: number, rows: number) => Promise<{ success: boolean }>;
   getFileTree: () => Promise<FileNode | null>;
-  revertFile: (filePath: string) => Promise<RevertResult>;
+  revertFile: (sessionId: string, filePath: string) => Promise<RevertResult>;
   getGitStatus: () => Promise<GitStatus>;
   stageFile: (filePath: string) => Promise<{ success: boolean }>;
   unstageFile: (filePath: string) => Promise<{ success: boolean }>;

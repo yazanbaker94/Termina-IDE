@@ -9,9 +9,10 @@ import type { FSWatcher } from 'chokidar';
 let mainWindow: BrowserWindow | null = null;
 let rootPath: string | null = null;
 let agentPty: pty.IPty | null = null;
+let agentSessionId: string | null = null;
 let agentStopRequested = false;
 let fileWatcher: FSWatcher | null = null;
-const fileSnapshots = new Map<string, string>();
+const sessionFileSnapshots = new Map<string, Map<string, string>>();
 
 const MAX_DEPTH = 5;
 const MAX_FILES = 2000;
@@ -186,9 +187,10 @@ function stopFileWatcher() {
   }
 }
 
-function captureFileSnapshots() {
+function captureFileSnapshots(sessionId: string) {
   if (!rootPath) return;
-  fileSnapshots.clear();
+  const snaps = new Map<string, string>();
+  sessionFileSnapshots.set(sessionId, snaps);
 
   let snapCount = 0;
   const MAX_SNAPSHOTS = 2000;
@@ -212,7 +214,7 @@ function captureFileSnapshots() {
         const ext = path.extname(entry.name).toLowerCase();
         if (BINARY_EXTS.has(ext)) continue;
         try {
-          fileSnapshots.set(fullPath, fs.readFileSync(fullPath, 'utf-8'));
+          snaps.set(fullPath, fs.readFileSync(fullPath, 'utf-8'));
           snapCount++;
         } catch {}
       }
@@ -245,18 +247,20 @@ function resolveCommandCode(): { command: string; args: string[] } | null {
   return { command: executable, args: [] };
 }
 
-function startAgent(): { success: boolean; error?: string } {
+function startAgent(sessionId: string): { success: boolean; error?: string } {
   if (!rootPath) return { success: false, error: 'No project folder is open.' };
 
   stopAgent();
   agentStopRequested = false;
-  captureFileSnapshots();
+  agentSessionId = sessionId;
+  captureFileSnapshots(sessionId);
 
   const cols = 80;
   const rows = 24;
   const cmdInfo = resolveCommandCode();
 
   if (!cmdInfo) {
+    agentSessionId = null;
     return { success: false, error: 'Could not find command-code. Make sure Command Code CLI is installed and available in your PATH.' };
   }
 
@@ -281,20 +285,24 @@ function startAgent(): { success: boolean; error?: string } {
       env: { ...process.env } as { [key: string]: string },
     });
   } catch (err: any) {
+    agentSessionId = null;
     return { success: false, error: `Failed to spawn agent: ${err.message}` };
   }
 
+  const owningSession = sessionId;
+
   agentPty.onData((data: string) => {
-    sendToRenderer('agent:onData', data);
+    sendToRenderer('agent:onData', { sessionId: owningSession, data });
   });
 
   agentPty.onExit(({ exitCode }: { exitCode: number }) => {
     if (!agentStopRequested) {
-      sendToRenderer('agent:onExit', exitCode);
+      sendToRenderer('agent:onExit', { sessionId: owningSession, exitCode });
     } else {
-      sendToRenderer('agent:onExit', -1);
+      sendToRenderer('agent:onExit', { sessionId: owningSession, exitCode: -1 });
     }
     agentPty = null;
+    agentSessionId = null;
     agentStopRequested = false;
   });
 
@@ -310,6 +318,7 @@ function stopAgent() {
       // already dead
     }
     agentPty = null;
+    agentSessionId = null;
   }
 }
 
@@ -377,7 +386,6 @@ function setupIPC() {
     if (result.canceled || !result.filePaths.length) return null;
 
     stopAgent();
-    fileSnapshots.clear();
     rootPath = result.filePaths[0];
     fileCount = 0;
     const tree = buildFileTree(rootPath);
@@ -415,16 +423,19 @@ function setupIPC() {
     }
   });
 
-  ipcMain.handle('agent:start', async () => {
+  ipcMain.handle('agent:start', async (_event, sessionId: string) => {
     if (!rootPath) {
       return { success: false, error: 'No project folder is open.' };
     }
-    return startAgent();
+    if (agentPty && agentSessionId && agentSessionId !== sessionId) {
+      return { success: false, error: `Agent is already running in another chat. Stop it before starting a new one.` };
+    }
+    return startAgent(sessionId);
   });
 
-  ipcMain.handle('agent:write', async (_event, input: string) => {
+  ipcMain.handle('agent:write', async (_event, _input: string) => {
     if (!agentPty) return { success: false };
-    agentPty.write(input);
+    agentPty.write(_input);
     return { success: true };
   });
 
@@ -433,9 +444,9 @@ function setupIPC() {
     return { success: true };
   });
 
-  ipcMain.handle('agent:restart', async () => {
+  ipcMain.handle('agent:restart', async (_event, sessionId: string) => {
     stopAgent();
-    return startAgent();
+    return startAgent(sessionId);
   });
 
   ipcMain.handle('agent:resize', async (_event, cols: number, rows: number) => {
@@ -457,15 +468,16 @@ function setupIPC() {
     return tree;
   });
 
-  ipcMain.handle('diff:getFileDiff', async (_event, filePath: string) => {
+  ipcMain.handle('diff:getFileDiff', async (_event, sessionId: string, filePath: string) => {
     if (!rootPath) return null;
 
     const resolved = safeResolvePath(filePath);
     const ext = path.extname(resolved).toLowerCase();
     const language = getLanguage(ext);
     const fileName = path.basename(resolved);
-    const wasSnapshotted = fileSnapshots.has(resolved);
-    const beforeContent = fileSnapshots.get(resolved) ?? '';
+    const snaps = sessionFileSnapshots.get(sessionId);
+    const wasSnapshotted = snaps?.has(resolved) ?? false;
+    const beforeContent = snaps?.get(resolved) ?? '';
 
     let afterContent = '';
     let changeType: 'added' | 'changed' | 'deleted' = 'changed';
@@ -489,12 +501,13 @@ function setupIPC() {
     };
   });
 
-  ipcMain.handle('diff:revertFile', async (_event, filePath: string) => {
+  ipcMain.handle('diff:revertFile', async (_event, sessionId: string, filePath: string) => {
     if (!rootPath) return { success: false, action: 'none', filePath, existedInSnapshot: false };
 
     const resolved = safeResolvePath(filePath);
-    const wasSnapshotted = fileSnapshots.has(resolved);
-    const beforeContent = fileSnapshots.get(resolved) ?? '';
+    const snaps = sessionFileSnapshots.get(sessionId);
+    const wasSnapshotted = snaps?.has(resolved) ?? false;
+    const beforeContent = snaps?.get(resolved) ?? '';
 
     if (wasSnapshotted) {
       try {
@@ -567,7 +580,6 @@ function setupIPC() {
       }
 
       stopAgent();
-      fileSnapshots.clear();
       rootPath = resolved;
       fileCount = 0;
       const tree = buildFileTree(rootPath);

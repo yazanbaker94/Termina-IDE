@@ -1,6 +1,7 @@
 import React from 'react';
-import { MessageSquarePlus, FolderGit2, Hash, MessageSquare, Files, FolderOpen } from 'lucide-react';
+import { MessageSquarePlus, FolderGit2, MessageSquare, Files, FolderOpen } from 'lucide-react';
 import { StoredProject, StoredSession } from '../data/store';
+import { SessionRuntimeState } from '../types';
 
 interface SessionRailProps {
   projects: StoredProject[];
@@ -8,6 +9,8 @@ interface SessionRailProps {
   activeProjectId: string | null;
   activeSessionId: string | null;
   hasProject: boolean;
+  runningSessionId: string | null;
+  sessionRuntime: Record<string, SessionRuntimeState>;
   onNewChat: () => void;
   onToggleFiles: () => void;
   onSelectSession: (sessionId: string) => void;
@@ -15,12 +18,21 @@ interface SessionRailProps {
   onOpenFolder: () => void;
 }
 
+const statusColors: Record<string, string> = {
+  running: '#a6e3a1',
+  starting: '#f9e2af',
+  exited: '#f38ba8',
+  idle: 'transparent',
+};
+
 const SessionRail: React.FC<SessionRailProps> = ({
   projects,
   sessions,
   activeProjectId,
   activeSessionId,
   hasProject,
+  runningSessionId,
+  sessionRuntime,
   onNewChat,
   onToggleFiles,
   onSelectSession,
@@ -67,17 +79,29 @@ const SessionRail: React.FC<SessionRailProps> = ({
 
               {isActiveProject && (
                 <div className="session-sessions-list">
-                  {sessions.map((s) => (
-                    <button
-                      key={s.id}
-                      className={`session-chat-row ${s.id === activeSessionId ? 'active' : ''}`}
-                      onClick={() => onSelectSession(s.id)}
-                      title={s.label}
-                    >
-                      <MessageSquare size={13} className="session-chat-icon" />
-                      <span className="session-chat-label">{s.label}</span>
-                    </button>
-                  ))}
+                  {sessions.map((s) => {
+                    const runtime = sessionRuntime[s.id];
+                    const agentStatus = runtime?.agentStatus ?? 'idle';
+                    const isRunning = runningSessionId === s.id;
+                    return (
+                      <button
+                        key={s.id}
+                        className={`session-chat-row ${s.id === activeSessionId ? 'active' : ''}`}
+                        onClick={() => onSelectSession(s.id)}
+                        title={s.label}
+                      >
+                        <span
+                          className="session-chat-status-dot"
+                          style={{
+                            backgroundColor: isRunning ? statusColors.running : agentStatus === 'exited' ? statusColors.exited : agentStatus === 'starting' ? statusColors.starting : 'transparent',
+                            border: (!isRunning && agentStatus === 'idle') ? '1px solid var(--text-muted)' : 'none',
+                          }}
+                        />
+                        <MessageSquare size={13} className="session-chat-icon" />
+                        <span className="session-chat-label">{s.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>

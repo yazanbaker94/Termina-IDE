@@ -8,20 +8,16 @@ import AgentPanel from './components/AgentPanel';
 import FilesDrawer from './components/FilesDrawer';
 import BottomBar from './components/BottomBar';
 import { loadAppData, saveAppData, generateId, StoredProject, StoredSession, AppData } from './data/store';
-import { FileNode, FileState, OpenFolderResult, FileChangeEvent, FileDiff, GitStatus, AgentStatus } from './types';
+import { FileNode, FileState, OpenFolderResult, FileChangeEvent, FileDiff, GitStatus, SessionRuntimeState } from './types';
 
-interface SessionState {
-  activeFilePath: string | null;
-  activeFileName: string | null;
-  diffPath: string | null;
-  changedFiles: FileChangeEvent[];
-}
+const MAX_TERMINAL_BUFFER = 200000;
 
 const App: React.FC = () => {
   const [appData, setAppData] = useState<AppData>(loadAppData);
   const { projects, sessions, activeProjectId, activeSessionId } = appData;
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
+  const activeProjectSessions = sessions.filter((s) => s.projectId === activeProjectId);
 
   const [projectName, setProjectName] = useState<string | null>(null);
   const [rootPath, setRootPath] = useState<string | null>(null);
@@ -31,17 +27,15 @@ const App: React.FC = () => {
   const [savedContent, setSavedContent] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string>('');
-
-  const [agentStatus, setAgentStatus] = useState<AgentStatus>('idle');
-  const [agentExitCode, setAgentExitCode] = useState<number | null>(null);
-  const [agentError, setAgentError] = useState<string>('');
-  const [changedFiles, setChangedFiles] = useState<FileChangeEvent[]>([]);
-  const [restartCount, setRestartCount] = useState(0);
   const [activeDiff, setActiveDiff] = useState<FileDiff | null>(null);
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [filesDrawerVisible, setFilesDrawerVisible] = useState(false);
 
-  const sessionStateMap = useRef<Map<string, SessionState>>(new Map());
+  const [sessionRuntime, setSessionRuntime] = useState<Record<string, SessionRuntimeState>>({});
+  const [runningAgentSessionId, setRunningAgentSessionId] = useState<string | null>(null);
+  const [pendingAutoStartSessionId, setPendingAutoStartSessionId] = useState<string | null>(null);
+
+  const activeRuntime = activeSessionId ? sessionRuntime[activeSessionId] : null;
 
   const activeFileRef = useRef(activeFile);
   activeFileRef.current = activeFile;
@@ -54,11 +48,9 @@ const App: React.FC = () => {
   const agentListenersRef = useRef<(() => void)[]>([]);
   const agentHasRunRef = useRef(false);
   const xtermWriteRef = useRef<((data: string) => void) | null>(null);
-  const xtermWriteBufferedRef = useRef<string[]>([]);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingChangedPathsRef = useRef<Set<string>>(new Set());
   const pendingDeletedPathsRef = useRef<Set<string>>(new Set());
-  const startAgentRef = useRef<() => Promise<void>>(async () => {});
 
   const isDirty = activeFile ? activeFile.content !== savedContent : false;
   isDirtyRef.current = isDirty;
@@ -66,6 +58,45 @@ const App: React.FC = () => {
   const persist = useCallback((data: AppData) => {
     setAppData(data);
     saveAppData(data);
+  }, []);
+
+  const updateSessionRuntime = useCallback((sessionId: string, update: Partial<SessionRuntimeState>) => {
+    setSessionRuntime((prev) => {
+      const current = prev[sessionId] ?? {
+        agentStatus: 'idle' as const,
+        exitCode: null,
+        error: '',
+        terminalBuffer: '',
+        changedFiles: [],
+        restartCount: 0,
+        activeFilePath: null,
+        activeFileName: null,
+        diffPath: null,
+      };
+      return { ...prev, [sessionId]: { ...current, ...update } };
+    });
+  }, []);
+
+  const appendTerminalBuffer = useCallback((sessionId: string, data: string) => {
+    setSessionRuntime((prev) => {
+      const current = prev[sessionId];
+      const existing = current?.terminalBuffer ?? '';
+      let buf = existing + data;
+      if (buf.length > MAX_TERMINAL_BUFFER) {
+        buf = buf.slice(buf.length - MAX_TERMINAL_BUFFER);
+      }
+      return { ...prev, [sessionId]: { ...(current ?? {
+        agentStatus: 'idle' as const,
+        exitCode: null,
+        error: '',
+        terminalBuffer: '',
+        changedFiles: [],
+        restartCount: 0,
+        activeFilePath: null,
+        activeFileName: null,
+        diffPath: null,
+      }), terminalBuffer: buf } };
+    });
   }, []);
 
   const cleanAgentListeners = useCallback(() => {
@@ -100,56 +131,70 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const setupAgentListeners = useCallback(() => {
+  const setupAgentListeners = useCallback((owningSessionId: string) => {
     cleanAgentListeners();
 
-    const unsubData = window.electronAPI.onAgentData((data: string) => {
+    const unsubData = window.electronAPI.onAgentData(({ sessionId, data }) => {
+      if (sessionId !== owningSessionId) return;
+      appendTerminalBuffer(sessionId, data);
       if (xtermWriteRef.current) {
         xtermWriteRef.current(data);
-      } else {
-        xtermWriteBufferedRef.current.push(data);
       }
     });
 
-    const unsubExit = window.electronAPI.onAgentExit((exitCode: number) => {
+    const unsubExit = window.electronAPI.onAgentExit(({ sessionId, exitCode }) => {
+      if (sessionId !== owningSessionId) return;
       if (exitCode >= 0) {
-        setAgentStatus('exited');
-        setAgentExitCode(exitCode);
+        updateSessionRuntime(sessionId, { agentStatus: 'exited', exitCode });
       }
+      setRunningAgentSessionId(null);
       cleanAgentListeners();
     });
 
     agentListenersRef.current = [unsubData, unsubExit];
-  }, [cleanAgentListeners]);
+  }, [cleanAgentListeners, appendTerminalBuffer, updateSessionRuntime]);
 
-  const snapshotSessionState = useCallback((sessionId: string | null) => {
-    if (!sessionId) return;
-    sessionStateMap.current.set(sessionId, {
-      activeFilePath: activeFileRef.current?.path ?? null,
-      activeFileName: activeFileRef.current?.name ?? null,
-      diffPath: activeDiffRef.current?.filePath ?? null,
-      changedFiles: [...changedFiles],
-    });
-  }, [changedFiles]);
+  const handleSave = useCallback(async () => {
+    if (!hasProjectRef.current || !activeFileRef.current) return;
+    const file = activeFileRef.current;
+    try {
+      await window.electronAPI.saveFile(file.path, file.content);
+      setSavedContent(file.content);
+      setSaveStatus('Saved');
+      setTimeout(() => setSaveStatus(''), 2000);
+    } catch (err) {
+      console.error('Failed to save file:', err);
+    }
+  }, []);
 
-  const restoreSessionState = useCallback((sessionId: string | null, cb: (state: SessionState) => void) => {
-    if (!sessionId) return;
-    const state = sessionStateMap.current.get(sessionId);
-    if (state) cb(state);
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleSave]);
+
+  const handleRefreshTree = useCallback(() => {
+    refreshFileTree();
+  }, [refreshFileTree]);
+
+  const handleToggleFiles = useCallback(() => {
+    setFilesDrawerVisible((v) => !v);
   }, []);
 
   const handleSelectProject = useCallback(
     async (project: StoredProject) => {
       if (project.id === activeProjectId && hasProject) return;
 
-      if (agentStatus === 'running') {
-        try {
-          await window.electronAPI.stopAgent();
-        } catch {}
+      if (runningAgentSessionId) {
+        try { await window.electronAPI.stopAgent(); } catch {}
         cleanAgentListeners();
+        setRunningAgentSessionId(null);
       }
-
-      snapshotSessionState(activeSessionId);
 
       try {
         const result = await window.electronAPI.openProjectPath(project.rootPath);
@@ -164,16 +209,11 @@ const App: React.FC = () => {
         setRootPath(result.rootPath);
         setRootTree(result.tree ?? null);
         setHasProject(true);
-        setAgentStatus('idle');
-        setAgentExitCode(null);
-        setAgentError('');
-        setChangedFiles([]);
-        setActiveDiff(null);
         setActiveFile(null);
         setSavedContent('');
+        setActiveDiff(null);
         setFilesDrawerVisible(false);
         agentHasRunRef.current = false;
-        xtermWriteRef.current = null;
 
         let current = { ...appData };
         current.activeProjectId = project.id;
@@ -201,11 +241,15 @@ const App: React.FC = () => {
 
         const unsubFs = window.electronAPI.onFileChanged((evt: FileChangeEvent) => {
           if (agentHasRunRef.current) {
-            setChangedFiles((prev) => {
-              const filtered = prev.filter((f) => f.path !== evt.path);
-              if (evt.changeType === 'deleted') return [...filtered, evt];
-              return [...filtered, evt];
-            });
+            const owningId = runningAgentSessionId;
+            if (owningId) {
+              updateSessionRuntime(owningId, {
+                changedFiles: (sessionRuntime[owningId]?.changedFiles ?? []).filter((f) => f.path !== evt.path).concat(
+                  evt.changeType !== 'deleted' && !sessionRuntime[owningId]?.changedFiles.some((f) => f.path === evt.path)
+                    ? [evt] : [],
+                ),
+              });
+            }
           }
           if (evt.changeType === 'deleted') {
             pendingDeletedPathsRef.current.add(evt.path);
@@ -246,11 +290,14 @@ const App: React.FC = () => {
               }
             }
             if (currentDiff && changedSet.has(currentDiff.filePath)) {
-              try {
-                const refreshed = await window.electronAPI.getFileDiff(currentDiff.filePath);
-                if (refreshed) setActiveDiff(refreshed);
-                else setActiveDiff(null);
-              } catch { setActiveDiff(null); }
+              const owningId = runningAgentSessionId;
+              if (owningId) {
+                try {
+                  const refreshed = await window.electronAPI.getFileDiff(owningId, currentDiff.filePath);
+                  if (refreshed) setActiveDiff(refreshed);
+                  else setActiveDiff(null);
+                } catch { setActiveDiff(null); }
+              }
             }
           }, 300);
         });
@@ -261,111 +308,63 @@ const App: React.FC = () => {
         setTimeout(() => setSaveStatus(''), 3000);
       }
     },
-    [activeProjectId, hasProject, agentStatus, activeSessionId, appData, cleanAllListeners, cleanAgentListeners, snapshotSessionState, refreshFileTree, refreshGitStatus],
+    [activeProjectId, hasProject, runningAgentSessionId, sessionRuntime, appData, cleanAllListeners, cleanAgentListeners, refreshFileTree, refreshGitStatus, updateSessionRuntime],
   );
-
-  const handleSave = useCallback(async () => {
-    if (!hasProjectRef.current || !activeFileRef.current) return;
-    const file = activeFileRef.current;
-    try {
-      await window.electronAPI.saveFile(file.path, file.content);
-      setSavedContent(file.content);
-      setSaveStatus('Saved');
-      setTimeout(() => setSaveStatus(''), 2000);
-    } catch (err) {
-      console.error('Failed to save file:', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        handleSave();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleSave]);
-
-  const handleRefreshTree = useCallback(() => {
-    refreshFileTree();
-  }, [refreshFileTree]);
-
-  const handleToggleFiles = useCallback(() => {
-    setFilesDrawerVisible((v) => !v);
-  }, []);
 
   const handleSelectSession = useCallback(
     (sessionId: string) => {
       if (sessionId === activeSessionId) return;
 
       const prevId = activeSessionId;
-
-      if (agentStatus === 'running') {
-        window.electronAPI.stopAgent().catch(() => {});
-        cleanAgentListeners();
-        setAgentStatus('idle');
+      if (prevId) {
+        updateSessionRuntime(prevId, {
+          activeFilePath: activeFileRef.current?.path ?? null,
+          activeFileName: activeFileRef.current?.name ?? null,
+          diffPath: activeDiffRef.current?.filePath ?? null,
+        });
       }
 
-      snapshotSessionState(prevId);
+      const nextRuntime = sessionRuntime[sessionId];
+      setActiveDiff(null);
 
-      persist({ ...appData, activeSessionId: sessionId });
-
-      restoreSessionState(sessionId, (state) => {
-        if (state.changedFiles.length > 0) {
-          setChangedFiles(state.changedFiles);
-        } else {
-          setChangedFiles([]);
-        }
-        setActiveDiff(null);
-
-        const filePath = state.activeFilePath;
-        if (filePath) {
-          window.electronAPI.readFile(filePath).then((result) => {
-            setActiveFile({
-              name: state.activeFileName ?? filePath.split(/[\\/]/).pop() ?? 'untitled',
-              path: result.filePath,
-              content: result.content,
-              language: result.language,
-            });
-            setSavedContent(result.content);
-          }).catch(() => {
-            setActiveFile(null);
-            setSavedContent('');
+      if (nextRuntime?.activeFilePath) {
+        window.electronAPI.readFile(nextRuntime.activeFilePath).then((result) => {
+          setActiveFile({
+            name: nextRuntime.activeFileName ?? nextRuntime.activeFilePath!.split(/[\\/]/).pop() ?? 'untitled',
+            path: result.filePath,
+            content: result.content,
+            language: result.language,
           });
-        } else {
+          setSavedContent(result.content);
+        }).catch(() => {
           setActiveFile(null);
           setSavedContent('');
-        }
-      });
+        });
+      } else {
+        setActiveFile(null);
+        setSavedContent('');
+      }
+
+      persist({ ...appData, activeSessionId: sessionId });
     },
-    [activeSessionId, agentStatus, appData, cleanAgentListeners, persist, snapshotSessionState, restoreSessionState],
+    [activeSessionId, appData, sessionRuntime, persist, updateSessionRuntime],
   );
 
-  const handleNewChat = useCallback(async () => {
+  const handleNewChat = useCallback(() => {
     if (!activeProjectId) return;
 
-    const prevId = activeSessionId;
-
-    if (agentStatus === 'running') {
-      try { await window.electronAPI.stopAgent(); } catch {}
+    if (runningAgentSessionId) {
+      try { window.electronAPI.stopAgent().catch(() => {}); } catch {}
       cleanAgentListeners();
-      setAgentStatus('idle');
+      setRunningAgentSessionId(null);
     }
 
-    snapshotSessionState(prevId);
-
-    setActiveFile(null);
-    setSavedContent('');
-    setChangedFiles([]);
-    setActiveDiff(null);
-
     const sessionId = generateId();
+    const projectChats = sessions.filter((s) => s.projectId === activeProjectId);
     const newSession: StoredSession = {
       id: sessionId,
       projectId: activeProjectId,
-      label: `Chat ${sessions.filter((s) => s.projectId === activeProjectId).length + 1}`,
+      label: `Chat ${projectChats.length + 1}`,
       createdAt: Date.now(),
     };
     persist({
@@ -374,21 +373,28 @@ const App: React.FC = () => {
       activeSessionId: sessionId,
     });
 
-    // Auto-start agent for the new session
-    setTimeout(() => {
-      startAgentRef.current();
-    }, 100);
-  }, [activeProjectId, activeSessionId, agentStatus, appData, sessions, cleanAgentListeners, persist, snapshotSessionState]);
+    setActiveFile(null);
+    setSavedContent('');
+    setActiveDiff(null);
+    setPendingAutoStartSessionId(sessionId);
+  }, [activeProjectId, runningAgentSessionId, appData, sessions, cleanAgentListeners, persist]);
+
+  useEffect(() => {
+    if (pendingAutoStartSessionId && activeSessionId === pendingAutoStartSessionId && hasProject) {
+      const sessionId = pendingAutoStartSessionId;
+      setPendingAutoStartSessionId(null);
+      handleStartAgent(sessionId);
+    }
+  }, [pendingAutoStartSessionId, activeSessionId, hasProject]);
 
   const handleOpenFolder = useCallback(async () => {
     try {
-      if (agentStatus === 'running') {
+      if (runningAgentSessionId) {
         await window.electronAPI.stopAgent().catch(() => {});
         cleanAgentListeners();
-        setAgentStatus('idle');
+        setRunningAgentSessionId(null);
       }
 
-      snapshotSessionState(activeSessionId);
       cleanAllListeners();
 
       const result: OpenFolderResult | null = await window.electronAPI.openFolder();
@@ -398,16 +404,11 @@ const App: React.FC = () => {
       setRootPath(result.rootPath);
       setRootTree(result.tree);
       setHasProject(true);
-      setAgentStatus('idle');
-      setAgentExitCode(null);
-      setAgentError('');
       setActiveFile(null);
       setSavedContent('');
-      setChangedFiles([]);
       setActiveDiff(null);
       setFilesDrawerVisible(false);
       agentHasRunRef.current = false;
-      xtermWriteRef.current = null;
 
       let current = { ...appData };
 
@@ -446,11 +447,15 @@ const App: React.FC = () => {
 
       const unsubFs = window.electronAPI.onFileChanged((evt: FileChangeEvent) => {
         if (agentHasRunRef.current) {
-          setChangedFiles((prev) => {
-            const filtered = prev.filter((f) => f.path !== evt.path);
-            if (evt.changeType === 'deleted') return [...filtered, evt];
-            return [...filtered, evt];
-          });
+          const owningId = runningAgentSessionId;
+          if (owningId) {
+            updateSessionRuntime(owningId, {
+              changedFiles: (sessionRuntime[owningId]?.changedFiles ?? []).filter((f) => f.path !== evt.path).concat(
+                evt.changeType !== 'deleted' && !sessionRuntime[owningId]?.changedFiles.some((f) => f.path === evt.path)
+                  ? [evt] : [],
+              ),
+            });
+          }
         }
         if (evt.changeType === 'deleted') {
           pendingDeletedPathsRef.current.add(evt.path);
@@ -491,11 +496,14 @@ const App: React.FC = () => {
             }
           }
           if (currentDiff && changedSet.has(currentDiff.filePath)) {
-            try {
-              const refreshed = await window.electronAPI.getFileDiff(currentDiff.filePath);
-              if (refreshed) setActiveDiff(refreshed);
-              else setActiveDiff(null);
-            } catch { setActiveDiff(null); }
+            const owningId = runningAgentSessionId;
+            if (owningId) {
+              try {
+                const refreshed = await window.electronAPI.getFileDiff(owningId, currentDiff.filePath);
+                if (refreshed) setActiveDiff(refreshed);
+                else setActiveDiff(null);
+              } catch { setActiveDiff(null); }
+            }
           }
         }, 300);
       });
@@ -506,7 +514,7 @@ const App: React.FC = () => {
     } catch (err) {
       console.error('Failed to open folder:', err);
     }
-  }, [agentStatus, activeSessionId, appData, cleanAllListeners, cleanAgentListeners, snapshotSessionState, refreshFileTree, refreshGitStatus]);
+  }, [runningAgentSessionId, sessionRuntime, appData, cleanAllListeners, cleanAgentListeners, refreshFileTree, refreshGitStatus, updateSessionRuntime]);
 
   const handleFileSelect = useCallback(async (node: FileNode) => {
     if (node.type === 'directory') return;
@@ -530,17 +538,22 @@ const App: React.FC = () => {
   }, []);
 
   const handleChangedFileClick = useCallback(async (evt: FileChangeEvent) => {
+    if (!activeSessionId) return;
     setIsLoading(true);
     try {
-      const diff = await window.electronAPI.getFileDiff(evt.path);
+      const diff = await window.electronAPI.getFileDiff(activeSessionId, evt.path);
       if (diff) setActiveDiff(diff);
-      setChangedFiles((prev) => prev.filter((f) => f.path !== evt.path));
+      if (activeSessionId) {
+        updateSessionRuntime(activeSessionId, {
+          changedFiles: (sessionRuntime[activeSessionId]?.changedFiles ?? []).filter((f) => f.path !== evt.path),
+        });
+      }
     } catch (err) {
       console.error('Failed to get file diff:', err);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [activeSessionId, sessionRuntime, updateSessionRuntime]);
 
   const handleCloseDiff = useCallback(() => setActiveDiff(null), []);
 
@@ -559,14 +572,17 @@ const App: React.FC = () => {
   }, []);
 
   const handleRevertFile = useCallback(async (filePath: string) => {
+    if (!activeSessionId) return;
     try {
-      const result = await window.electronAPI.revertFile(filePath);
+      const result = await window.electronAPI.revertFile(activeSessionId, filePath);
       if (!result.success) {
         setSaveStatus('Revert failed');
         setTimeout(() => setSaveStatus(''), 2000);
         return;
       }
-      setChangedFiles((prev) => prev.filter((f) => f.path !== filePath));
+      updateSessionRuntime(activeSessionId, {
+        changedFiles: (sessionRuntime[activeSessionId]?.changedFiles ?? []).filter((f) => f.path !== filePath),
+      });
       setActiveDiff(null);
       await refreshFileTree();
       if (result.action === 'restored') {
@@ -585,7 +601,7 @@ const App: React.FC = () => {
     } catch (err) {
       console.error('Failed to revert file:', err);
     }
-  }, [refreshFileTree]);
+  }, [activeSessionId, sessionRuntime, refreshFileTree, updateSessionRuntime]);
 
   const handleStageFile = useCallback(async (filePath: string) => { await window.electronAPI.stageFile(filePath); refreshGitStatus(); }, [refreshGitStatus]);
   const handleUnstageFile = useCallback(async (filePath: string) => { await window.electronAPI.unstageFile(filePath); refreshGitStatus(); }, [refreshGitStatus]);
@@ -613,70 +629,110 @@ const App: React.FC = () => {
     }
   }, [refreshGitStatus, refreshFileTree]);
 
-  const handleStartAgent = useCallback(async () => {
-    try {
-      setAgentError('');
-      setChangedFiles([]);
-      setActiveDiff(null);
-      xtermWriteBufferedRef.current = [];
-      agentHasRunRef.current = true;
-      setupAgentListeners();
-      const result = await window.electronAPI.startAgent();
-      if (!result.success) { setAgentError(result.error || 'Failed to start agent.'); cleanAgentListeners(); return; }
-      setAgentStatus('running');
-      setAgentExitCode(null);
-    } catch (err) { console.error('Failed to start agent:', err); setAgentError(String(err)); cleanAgentListeners(); }
-  }, [setupAgentListeners, cleanAgentListeners]);
-  startAgentRef.current = handleStartAgent;
+  const handleStartAgent = useCallback(async (sessionId: string) => {
+    if (runningAgentSessionId && runningAgentSessionId !== sessionId) {
+      const runningLabel = sessions.find((s) => s.id === runningAgentSessionId)?.label ?? 'another chat';
+      const errorMsg = `Agent is already running in ${runningLabel}. Stop it before starting a new one.`;
+      updateSessionRuntime(sessionId, { error: errorMsg });
+      setSaveStatus(errorMsg);
+      setTimeout(() => setSaveStatus(''), 4000);
+      return;
+    }
 
-  const handleWriteAgent = useCallback(async (input: string) => { try { await window.electronAPI.writeAgent(input); } catch (err) { console.error('Failed to write to agent:', err); } }, []);
-  const handleStopAgent = useCallback(async () => { try { await window.electronAPI.stopAgent(); cleanAgentListeners(); setAgentStatus('idle'); setAgentError(''); } catch (err) { console.error('Failed to stop agent:', err); } }, [cleanAgentListeners]);
+    updateSessionRuntime(sessionId, { error: '', changedFiles: [], restartCount: (sessionRuntime[sessionId]?.restartCount ?? 0) + 1 });
+
+    setupAgentListeners(sessionId);
+
+    const result = await window.electronAPI.startAgent(sessionId);
+    if (!result.success) {
+      updateSessionRuntime(sessionId, { agentStatus: 'idle', error: result.error ?? 'Failed to start agent.' });
+      cleanAgentListeners();
+      return;
+    }
+
+    updateSessionRuntime(sessionId, { agentStatus: 'running', exitCode: null });
+    setRunningAgentSessionId(sessionId);
+  }, [runningAgentSessionId, sessions, sessionRuntime, setupAgentListeners, cleanAgentListeners, updateSessionRuntime]);
+
+  const handleWriteAgent = useCallback(async (input: string) => {
+    if (!runningAgentSessionId || !activeSessionId) return;
+    if (runningAgentSessionId !== activeSessionId) return;
+    try {
+      await window.electronAPI.writeAgent(input);
+    } catch (err) {
+      console.error('Failed to write to agent:', err);
+    }
+  }, [runningAgentSessionId, activeSessionId]);
+
+  const handleStopAgent = useCallback(async () => {
+    try {
+      await window.electronAPI.stopAgent();
+      cleanAgentListeners();
+      setRunningAgentSessionId(null);
+      if (activeSessionId) {
+        updateSessionRuntime(activeSessionId, { agentStatus: 'idle' });
+      }
+    } catch (err) {
+      console.error('Failed to stop agent:', err);
+    }
+  }, [activeSessionId, cleanAgentListeners, updateSessionRuntime]);
 
   const handleRestartAgent = useCallback(async () => {
-    try {
+    if (!activeSessionId) return;
+    cleanAgentListeners();
+    setRunningAgentSessionId(null);
+    updateSessionRuntime(activeSessionId, { error: '', changedFiles: [], restartCount: (sessionRuntime[activeSessionId]?.restartCount ?? 0) + 1 });
+    setupAgentListeners(activeSessionId);
+    const result = await window.electronAPI.restartAgent(activeSessionId);
+    if (!result.success) {
+      updateSessionRuntime(activeSessionId, { agentStatus: 'idle', error: result.error ?? 'Failed to restart agent.' });
       cleanAgentListeners();
-      setAgentError('');
-      setChangedFiles([]);
-      setActiveDiff(null);
-      xtermWriteBufferedRef.current = [];
-      agentHasRunRef.current = true;
-      setRestartCount((n) => n + 1);
-      setupAgentListeners();
-      const result = await window.electronAPI.restartAgent();
-      if (!result.success) { setAgentError(result.error || 'Failed to restart agent.'); cleanAgentListeners(); return; }
-      setAgentStatus('running');
-      setAgentExitCode(null);
-    } catch (err) { console.error('Failed to restart agent:', err); setAgentError(String(err)); cleanAgentListeners(); }
-  }, [setupAgentListeners, cleanAgentListeners]);
+      return;
+    }
+    updateSessionRuntime(activeSessionId, { agentStatus: 'running', exitCode: null });
+    setRunningAgentSessionId(activeSessionId);
+  }, [activeSessionId, sessionRuntime, setupAgentListeners, cleanAgentListeners, updateSessionRuntime]);
+
+  const handleRenameSession = useCallback((sessionId: string, newLabel: string) => {
+    setAppData((prev) => {
+      const updated = {
+        ...prev,
+        sessions: prev.sessions.map((s) =>
+          s.id === sessionId ? { ...s, label: newLabel, renamedFromPrompt: true, updatedAt: Date.now() } : s,
+        ),
+      };
+      saveAppData(updated);
+      return updated;
+    });
+  }, []);
 
   const handleXtermWriteReady = useCallback((writeFn: (data: string) => void) => {
     xtermWriteRef.current = writeFn;
-    const buffered = xtermWriteBufferedRef.current;
-    xtermWriteBufferedRef.current = [];
-    for (const data of buffered) writeFn(data);
   }, []);
 
   useEffect(() => { return () => { cleanAllListeners(); }; }, [cleanAllListeners]);
 
   const showEditor = !!activeFile || !!activeDiff;
-  const projectSessions = sessions.filter((s) => s.projectId === activeProjectId);
 
   return (
     <div className="app-container">
       <Toolbar
         onOpenFolder={handleOpenFolder}
-        onRunAgent={activeSession ? handleStartAgent : handleNewChat}
+        onRunAgent={() => activeSessionId && handleStartAgent(activeSessionId)}
         onToggleFiles={handleToggleFiles}
-        agentDisabled={!hasProject || !activeSession}
-        agentRunning={agentStatus === 'running'}
+        agentDisabled={!hasProject || !activeSessionId}
+        agentRunning={runningAgentSessionId === activeSessionId && (activeRuntime?.agentStatus === 'running' || activeRuntime?.agentStatus === 'starting')}
+        otherChatRunning={!!runningAgentSessionId && runningAgentSessionId !== activeSessionId}
       />
       <div className="app-body">
         <SessionRail
           projects={projects}
-          sessions={projectSessions}
+          sessions={activeProjectSessions}
           activeProjectId={activeProjectId}
           activeSessionId={activeSessionId}
           hasProject={hasProject}
+          runningSessionId={runningAgentSessionId}
+          sessionRuntime={sessionRuntime}
           onNewChat={handleNewChat}
           onToggleFiles={handleToggleFiles}
           onSelectSession={handleSelectSession}
@@ -685,7 +741,7 @@ const App: React.FC = () => {
         />
 
         <div className="app-main">
-          {hasProject && !activeSession && (
+          {hasProject && !activeSessionId && (
             <div className="app-no-session">
               <div className="app-no-session-icon">
                 <MessageSquarePlus size={40} />
@@ -695,7 +751,7 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {activeSession && showEditor && (
+          {activeSessionId && showEditor && (
             <div className="app-editor-pane">
               {activeDiff ? (
                 <DiffViewer diff={activeDiff} onClose={handleCloseDiff} onOpenFile={handleOpenFile} onRevertFile={handleRevertFile} />
@@ -705,17 +761,21 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {activeSession && (
+          {activeSessionId && (
             <div className={`app-agent-pane ${showEditor ? 'with-editor' : ''}`}>
               <AgentPanel
-                status={agentStatus}
-                exitCode={agentExitCode}
-                error={agentError}
-                changedFiles={changedFiles}
-                restartCount={restartCount}
+                sessionId={activeSessionId}
+                status={activeRuntime?.agentStatus ?? 'idle'}
+                exitCode={activeRuntime?.exitCode ?? null}
+                error={activeRuntime?.error ?? ''}
+                changedFiles={activeRuntime?.changedFiles ?? []}
+                terminalBuffer={activeRuntime?.terminalBuffer ?? ''}
+                restartCount={activeRuntime?.restartCount ?? 0}
                 hasProject={hasProject}
                 gitStatus={gitStatus}
                 sessionLabel={activeSession?.label ?? null}
+                runningSessionId={runningAgentSessionId}
+                onRenameSession={handleRenameSession}
                 onWrite={handleWriteAgent}
                 onStop={handleStopAgent}
                 onRestart={handleRestartAgent}
