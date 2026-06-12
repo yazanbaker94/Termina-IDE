@@ -1,0 +1,69 @@
+{
+  "name": "command-code-ide",
+  "version": "0.1.0",
+  "description": "Desktop IDE for Command Code CLI",
+  "author": "Command Code",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/commandcode/command-code-ide"
+  },
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "npm run build:electron && concurrently -k -n vite,electron \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "dev:renderer": "vite",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:renderer": "tsc -p tsconfig.json --noEmit && vite build",
+    "build": "npm run build:electron && npm run build:renderer",
+    "start": "electron .",
+    "preview": "vite preview",
+    "package": "npm run build && electron-builder --win --dir",
+    "dist": "npm run build && electron-builder --win"
+  },
+  "build": {
+    "appId": "ai.commandcode.ide",
+    "productName": "Command Code IDE",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "npmRebuild": true,
+    "asarUnpack": [
+      "node_modules/node-pty/**/*"
+    ]
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.6.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "chokidar": "^4.0.3",
+    "lucide-react": "^0.460.0",
+    "node-pty": "^1.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^9.0.1",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.1",
+    "wait-on": "^8.0.1"
+  }
+}
