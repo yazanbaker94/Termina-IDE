@@ -64,8 +64,60 @@ body {
   overflow: hidden;
 }
 
-/* ===== Code Review Pane (right side) ===== */
+/* Agent region fills main workspace, never resized by dock */
+.agent-region {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 
+.agent-region .agent-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Right dock — overlays agent on right side */
+.right-dock {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: stretch;
+  z-index: 10;
+  animation: right-dock-slide-in 0.2s ease;
+}
+
+@keyframes right-dock-slide-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.dock-pane {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.files-dock-pane {
+  width: 300px;
+  min-width: 260px;
+  max-width: 340px;
+  flex-shrink: 0;
+}
+
+.code-dock-pane {
+  width: 520px;
+  min-width: 420px;
+  max-width: 760px;
+  flex-shrink: 0;
+}
+
+/* Code review pane inside dock */
 .code-review-pane {
   width: var(--code-pane-width);
   min-width: 280px;
@@ -126,7 +178,11 @@ body {
   overflow: hidden;
 }
 
-.app-agent-pane .agent-panel {
+.app-agent-pane.with-editor {
+  /* terminal stays full size, dock overlays right side */
+}
+
+.agent-region .agent-panel {
   flex: 1;
   min-width: 0;
 }
@@ -266,6 +322,20 @@ body {
 .session-project-group {
   padding: 2px 0;
   position: relative;
+}
+.project-disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.project-sessions {
+  padding-left: 20px;
 }
 
 .session-project-row {
@@ -461,36 +531,14 @@ body {
   color: var(--text-primary);
 }
 
-/* ===== Files Drawer (overlay) ===== */
-
-.files-drawer-overlay {
-  position: fixed;
-  top: var(--toolbar-height);
-  right: 0;
-  bottom: var(--bottombar-height);
-  left: 0;
-  z-index: 20;
-  pointer-events: all;
-}
+/* ===== Files Drawer (dock pane) ===== */
 
 .files-drawer {
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: var(--files-drawer-width);
-  background: var(--bg-secondary);
-  border-left: 1px solid var(--border-subtle);
+  flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: -4px 0 12px rgba(0,0,0,0.3);
-  animation: files-drawer-slide-in 0.2s ease;
-}
-
-@keyframes files-drawer-slide-in {
-  from { transform: translateX(20px); opacity: 0.8; }
-  to { transform: translateX(0); opacity: 1; }
+  background: var(--bg-secondary);
 }
 
 .files-drawer-header {

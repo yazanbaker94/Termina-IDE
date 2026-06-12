@@ -4,7 +4,7 @@ import { FileNode } from '../types';
 import FileTree from './FileTree';
 
 interface FilesDrawerProps {
-  visible: boolean;
+  visible?: boolean;
   projectName: string | null;
   rootTree: FileNode | null;
   activeFilePath: string;
@@ -37,7 +37,6 @@ function filterTree(tree: FileNode | null, query: string): FileNode | null {
 }
 
 const FilesDrawer: React.FC<FilesDrawerProps> = ({
-  visible,
   projectName,
   rootTree,
   activeFilePath,
@@ -49,11 +48,8 @@ const FilesDrawer: React.FC<FilesDrawerProps> = ({
   const [filter, setFilter] = useState('');
   const filteredTree = useMemo(() => filterTree(rootTree, filter), [rootTree, filter]);
 
-  if (!visible) return null;
-
   return (
-    <div className="files-drawer-overlay" onClick={onClose}>
-      <div className="files-drawer" onClick={(e) => e.stopPropagation()}>
+    <div className="files-drawer">
       <div className="files-drawer-header">
         <span className="files-drawer-title">FILES</span>
         <div className="files-drawer-actions">
@@ -103,7 +99,6 @@ const FilesDrawer: React.FC<FilesDrawerProps> = ({
           />
         </div>
       )}
-    </div>
     </div>
   );
 };

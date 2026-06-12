@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { MessageSquarePlus, FolderGit2, MessageSquare, FolderOpen, MoreHorizontal, X } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { MessageSquarePlus, FolderGit2, MessageSquare, FolderOpen, MoreHorizontal, X, ChevronRight } from 'lucide-react';
 import { StoredProject, StoredSession } from '../data/store';
 import { SessionRuntimeState } from '../types';
 
@@ -13,6 +13,7 @@ interface SessionRailProps {
   onNewChat: () => void;
   onSelectSession: (sessionId: string) => void;
   onSelectProject: (project: StoredProject) => void;
+  onSelectProjectSession: (project: StoredProject, sessionId: string) => void;
   onOpenFolder: () => void;
   onRemoveProject: (projectId: string) => void;
 }
@@ -34,15 +35,36 @@ const SessionRail: React.FC<SessionRailProps> = ({
   onNewChat,
   onSelectSession,
   onSelectProject,
+  onSelectProjectSession,
   onOpenFolder,
   onRemoveProject,
 }) => {
   const [contextProjectId, setContextProjectId] = useState<string | null>(null);
+  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(() => new Set(projects.map((p) => p.id)));
+
+  const sessionsByProjectId = useMemo(() => {
+    const map: Record<string, StoredSession[]> = {};
+    for (const s of sessions) {
+      if (!map[s.projectId]) map[s.projectId] = [];
+      map[s.projectId].push(s);
+    }
+    return map;
+  }, [sessions]);
+
+  const toggleExpand = (projectId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpandedProjectIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+  };
 
   return (
     <div className="session-sidebar" onClick={() => setContextProjectId(null)}>
       <div className="session-sidebar-header">
-        <button className="session-new-chat-btn" onClick={onNewChat} title="New Chat">
+        <button className="session-new-chat-btn" onClick={onNewChat} title="New Chat" disabled={!activeProjectId}>
           <MessageSquarePlus size={16} />
           <span>New Chat</span>
         </button>
@@ -61,13 +83,24 @@ const SessionRail: React.FC<SessionRailProps> = ({
 
         {projects.map((p) => {
           const isActiveProject = p.id === activeProjectId;
+          const isExpanded = expandedProjectIds.has(p.id);
+          const projectSessions = sessionsByProjectId[p.id] ?? [];
+          const hasSessions = projectSessions.length > 0;
+
           return (
             <div key={p.id} className="session-project-group" onContextMenu={(e) => { e.preventDefault(); setContextProjectId(p.id); }}>
               <button
                 className={`session-project-row ${isActiveProject ? 'active' : ''}`}
-                onClick={() => onSelectProject(p)}
+                onClick={() => { onSelectProject(p); if (!isExpanded) setExpandedProjectIds((prev) => new Set(prev).add(p.id)); }}
                 title={p.name}
               >
+                <span
+                  className="project-disclosure"
+                  onClick={(e) => toggleExpand(p.id, e)}
+                  style={{ opacity: hasSessions ? 1 : 0.3 }}
+                >
+                  <ChevronRight size={12} style={{ transform: isExpanded ? 'rotate(90deg)' : undefined, transition: 'transform 0.15s ease' }} />
+                </span>
                 <FolderGit2 size={14} className="session-project-icon" />
                 <span className="session-project-name">{p.name}</span>
                 <button
@@ -89,17 +122,23 @@ const SessionRail: React.FC<SessionRailProps> = ({
                 </div>
               )}
 
-              {isActiveProject && (
-                <div className="session-sessions-list">
-                  {sessions.map((s) => {
+              {isExpanded && hasSessions && (
+                <div className="project-sessions">
+                  {projectSessions.map((s) => {
                     const runtime = sessionRuntime[s.id];
                     const agentStatus = runtime?.agentStatus ?? 'idle';
                     const isRunning = agentStatus === 'running';
                     return (
                       <button
                         key={s.id}
-                        className={`session-chat-row ${s.id === activeSessionId ? 'active' : ''}`}
-                        onClick={() => onSelectSession(s.id)}
+                        className={`session-chat-row ${s.id === activeSessionId && isActiveProject ? 'active' : ''}`}
+                        onClick={() => {
+                          if (isActiveProject) {
+                            onSelectSession(s.id);
+                          } else {
+                            onSelectProjectSession(p, s.id);
+                          }
+                        }}
                         title={s.label}
                       >
                         <span
@@ -127,4 +166,3 @@ const SessionRail: React.FC<SessionRailProps> = ({
 };
 
 export default SessionRail;
-
