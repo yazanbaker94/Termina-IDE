@@ -978,6 +978,51 @@ body {
   gap: 4px;
 }
 
+.agent-changes-bulk {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.agent-review-btn {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+  padding: 0 5px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  flex-shrink: 0;
+}
+
+.agent-review-btn.accept:hover {
+  color: #a6e3a1;
+  background: rgba(166, 227, 161, 0.12);
+}
+
+.agent-review-btn.reject:hover {
+  color: #f38ba8;
+  background: rgba(243, 139, 168, 0.12);
+}
+
+.agent-changed-item-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.agent-changed-item-row .agent-changed-item {
+  flex: 1;
+  min-width: 0;
+}
+
 .git-refresh-btn {
   display: inline-flex;
   align-items: center;

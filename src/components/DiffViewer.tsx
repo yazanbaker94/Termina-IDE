@@ -1,6 +1,6 @@
 import React from 'react';
 import { DiffEditor } from '@monaco-editor/react';
-import { X, ExternalLink, Undo2, FilePlus, FileEdit, FileMinus } from 'lucide-react';
+import { X, ExternalLink, Undo2, FilePlus, FileEdit, FileMinus, Check } from 'lucide-react';
 import { FileDiff } from '../types';
 
 interface DiffViewerProps {
@@ -8,6 +8,7 @@ interface DiffViewerProps {
   onClose: () => void;
   onOpenFile: (filePath: string) => void;
   onRevertFile: (filePath: string) => void;
+  onAcceptFile?: (filePath: string) => void;
 }
 
 function changeLabel(changeType: string) {
@@ -37,7 +38,7 @@ function changeClass(changeType: string) {
   }
 }
 
-const DiffViewer: React.FC<DiffViewerProps> = ({ diff, onClose, onOpenFile, onRevertFile }) => {
+const DiffViewer: React.FC<DiffViewerProps> = ({ diff, onClose, onOpenFile, onRevertFile, onAcceptFile }) => {
   return (
     <div className="editor-container">
       <div className="editor-tabs">
@@ -49,10 +50,19 @@ const DiffViewer: React.FC<DiffViewerProps> = ({ diff, onClose, onOpenFile, onRe
           </span>
         </div>
         <div className="editor-tab-actions">
+          {onAcceptFile && (
+            <button
+              className="panel-action-btn"
+              onClick={() => onAcceptFile(diff.filePath)}
+              title="Accept file changes"
+            >
+              <Check size={13} />
+            </button>
+          )}
           <button
             className="panel-action-btn"
             onClick={() => onRevertFile(diff.filePath)}
-            title="Revert file"
+            title="Reject file changes (restore snapshot)"
           >
             <Undo2 size={13} />
           </button>

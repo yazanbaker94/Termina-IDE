@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { StopCircle, RotateCcw, Play, Clock, AlertTriangle, FilePlus, FileEdit, FileMinus, RefreshCw, PlusCircle, MinusCircle, ChevronDown, ChevronRight } from 'lucide-react';
+import { StopCircle, RotateCcw, Play, Clock, AlertTriangle, FilePlus, FileEdit, FileMinus, RefreshCw, PlusCircle, MinusCircle, ChevronDown, ChevronRight, Check, X } from 'lucide-react';
 import { FileChangeEvent, GitStatus, AgentStatus } from '../types';
 
 interface AgentPanelProps {
@@ -22,6 +22,10 @@ interface AgentPanelProps {
   onRestart: () => void;
   onStart: () => void;
   onChangedFileClick: (evt: FileChangeEvent) => void;
+  onAcceptFile: (filePath: string) => void;
+  onRejectFile: (filePath: string) => void;
+  onAcceptAll: () => void;
+  onRejectAll: () => void;
   onStageFile: (filePath: string) => void;
   onUnstageFile: (filePath: string) => void;
   onCommitGit: (message: string) => Promise<boolean>;
@@ -72,6 +76,10 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   onRestart,
   onStart,
   onChangedFileClick,
+  onAcceptFile,
+  onRejectFile,
+  onAcceptAll,
+  onRejectAll,
   onStageFile,
   onUnstageFile,
   onCommitGit,
@@ -309,18 +317,35 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
             <div className="agent-changes-content">
               {hasAgentChanges && (
                 <div className="agent-changed-files">
-                  <div className="agent-changed-title">AGENT CHANGES</div>
+                  <div className="agent-changed-title">
+                    AGENT CHANGES
+                    <div className="agent-changes-bulk">
+                      <button className="agent-review-btn accept" onClick={onAcceptAll} title="Accept All">
+                        <Check size={10} /> All
+                      </button>
+                      <button className="agent-review-btn reject" onClick={onRejectAll} title="Reject All">
+                        <X size={10} /> All
+                      </button>
+                    </div>
+                  </div>
                   <div className="agent-changed-list">
                     {changedFiles.map((evt) => (
-                      <button
-                        key={evt.path}
-                        className={`agent-changed-item agent-changed-${evt.changeType}`}
-                        onClick={() => onChangedFileClick(evt)}
-                        title={evt.path}
-                      >
-                        <span className="agent-changed-icon">{changeIcon(evt.changeType)}</span>
-                        <span className="agent-changed-name">{evt.path.split(/[\\/]/).pop() || evt.path}</span>
-                      </button>
+                      <div key={evt.path} className="agent-changed-item-row">
+                        <button
+                          className={`agent-changed-item agent-changed-${evt.changeType}`}
+                          onClick={() => onChangedFileClick(evt)}
+                          title={evt.path}
+                        >
+                          <span className="agent-changed-icon">{changeIcon(evt.changeType)}</span>
+                          <span className="agent-changed-name">{evt.path.split(/[\\/]/).pop() || evt.path}</span>
+                        </button>
+                        <button className="agent-review-btn accept" onClick={() => onAcceptFile(evt.path)} title="Accept">
+                          <Check size={10} />
+                        </button>
+                        <button className="agent-review-btn reject" onClick={() => onRejectFile(evt.path)} title="Reject">
+                          <X size={10} />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </div>

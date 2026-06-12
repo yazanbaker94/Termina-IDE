@@ -612,8 +612,8 @@ const App: React.FC = () => {
     try {
       const result = await window.electronAPI.revertFile(activeSessionId, filePath);
       if (!result.success) {
-        setSaveStatus('Revert failed');
-        setTimeout(() => setSaveStatus(''), 2000);
+        setSaveStatus(`Failed to revert ${filePath.split(/[\\/]/).pop() || filePath}`);
+        setTimeout(() => setSaveStatus(''), 3000);
         return;
       }
       updateSessionRuntime(activeSessionId, {
@@ -641,6 +641,85 @@ const App: React.FC = () => {
 
   const handleStageFile = useCallback(async (filePath: string) => { await window.electronAPI.stageFile(filePath); refreshGitStatus(); }, [refreshGitStatus]);
   const handleUnstageFile = useCallback(async (filePath: string) => { await window.electronAPI.unstageFile(filePath); refreshGitStatus(); }, [refreshGitStatus]);
+
+  // IDE-level review: accept = keep current disk content, reject = restore snapshot.
+  // Independent of Command Code CLI protocol.
+  const handleAcceptFile = useCallback((filePath: string) => {
+    if (!activeSessionId) return;
+    updateSessionRuntime(activeSessionId, {
+      changedFiles: (sessionRuntimeRef.current[activeSessionId]?.changedFiles ?? []).filter((f) => f.path !== filePath),
+    });
+    setActiveDiff(null);
+    setSaveStatus(`Accepted ${filePath.split(/[\\/]/).pop() || filePath}`);
+    setTimeout(() => setSaveStatus(''), 2000);
+  }, [activeSessionId, updateSessionRuntime]);
+
+  const handleRejectFile = useCallback(async (filePath: string) => {
+    if (!activeSessionId) return;
+    try {
+      const result = await window.electronAPI.revertFile(activeSessionId, filePath);
+      if (!result.success) {
+        setSaveStatus(`Failed to revert ${filePath.split(/[\\/]/).pop() || filePath}`);
+        setTimeout(() => setSaveStatus(''), 3000);
+        return;
+      }
+      updateSessionRuntime(activeSessionId, {
+        changedFiles: (sessionRuntimeRef.current[activeSessionId]?.changedFiles ?? []).filter((f) => f.path !== filePath),
+      });
+      setActiveDiff(null);
+      refreshFileTree();
+      setSaveStatus(`Rejected ${filePath.split(/[\\/]/).pop() || filePath}`);
+      setTimeout(() => setSaveStatus(''), 2000);
+      refreshGitStatus();
+    } catch (err) {
+      console.error('Failed to reject file:', err);
+    }
+  }, [activeSessionId, updateSessionRuntime, refreshFileTree, refreshGitStatus]);
+
+  const handleAcceptAll = useCallback(() => {
+    if (!activeSessionId) return;
+    const files = sessionRuntimeRef.current[activeSessionId]?.changedFiles ?? [];
+    const count = files.length;
+    updateSessionRuntime(activeSessionId, { changedFiles: [] });
+    setActiveDiff(null);
+    setSaveStatus(`Accepted ${count} file${count !== 1 ? 's' : ''}`);
+    setTimeout(() => setSaveStatus(''), 2000);
+  }, [activeSessionId, updateSessionRuntime]);
+
+  const handleRejectAll = useCallback(async () => {
+    if (!activeSessionId) return;
+    const sessionId = activeSessionId;
+    const files = [...(sessionRuntimeRef.current[sessionId]?.changedFiles ?? [])];
+    let successCount = 0;
+    let failedPaths: string[] = [];
+
+    for (const evt of files) {
+      try {
+        const result = await window.electronAPI.revertFile(sessionId, evt.path);
+        if (result.success) {
+          successCount++;
+        } else {
+          failedPaths.push(evt.path);
+        }
+      } catch {
+        failedPaths.push(evt.path);
+      }
+    }
+
+    updateSessionRuntime(sessionId, {
+      changedFiles: files.filter((f) => failedPaths.includes(f.path)),
+    });
+    setActiveDiff(null);
+    refreshFileTree();
+    refreshGitStatus();
+
+    if (failedPaths.length > 0) {
+      setSaveStatus(`Rejected ${successCount} files, ${failedPaths.length} could not be reverted`);
+    } else {
+      setSaveStatus(`Rejected ${successCount} file${successCount !== 1 ? 's' : ''}`);
+    }
+    setTimeout(() => setSaveStatus(''), 3000);
+  }, [activeSessionId, updateSessionRuntime, refreshFileTree, refreshGitStatus]);
 
   const handleCommitGit = useCallback(async (message: string): Promise<boolean> => {
     try {
@@ -776,7 +855,7 @@ const App: React.FC = () => {
           {activeSessionId && showEditor && (
             <div className="app-editor-pane">
               {activeDiff ? (
-                <DiffViewer diff={activeDiff} onClose={handleCloseDiff} onOpenFile={handleOpenFile} onRevertFile={handleRevertFile} />
+                <DiffViewer diff={activeDiff} onClose={handleCloseDiff} onOpenFile={handleOpenFile} onRevertFile={handleRejectFile} onAcceptFile={handleAcceptFile} />
               ) : (
                 <Editor file={activeFile} isLoading={isLoading} isDirty={isDirty} hasProject={hasProject} onChange={handleEditorChange} onSave={handleSave} />
               )}
@@ -803,6 +882,10 @@ const App: React.FC = () => {
                 onRestart={handleRestartAgent}
                 onStart={() => activeSessionId && handleStartAgent(activeSessionId)}
                 onChangedFileClick={handleChangedFileClick}
+                onAcceptFile={handleAcceptFile}
+                onRejectFile={handleRejectFile}
+                onAcceptAll={handleAcceptAll}
+                onRejectAll={handleRejectAll}
                 onStageFile={handleStageFile}
                 onUnstageFile={handleUnstageFile}
                 onCommitGit={handleCommitGit}
