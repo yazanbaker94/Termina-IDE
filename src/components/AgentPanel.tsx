@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { StopCircle, RotateCcw, Clock, AlertTriangle, FilePlus, FileEdit, FileMinus, RefreshCw, PlusCircle, MinusCircle, ChevronDown, ChevronRight } from 'lucide-react';
+import { StopCircle, RotateCcw, Play, Clock, AlertTriangle, FilePlus, FileEdit, FileMinus, RefreshCw, PlusCircle, MinusCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { FileChangeEvent, GitStatus, AgentStatus } from '../types';
 
 interface AgentPanelProps {
@@ -20,6 +20,7 @@ interface AgentPanelProps {
   onWrite: (input: string) => void;
   onStop: () => void;
   onRestart: () => void;
+  onStart: () => void;
   onChangedFileClick: (evt: FileChangeEvent) => void;
   onStageFile: (filePath: string) => void;
   onUnstageFile: (filePath: string) => void;
@@ -39,14 +40,18 @@ function changeIcon(changeType: string) {
 
 function buildChatTitle(prompt: string): string {
   const clean = prompt.replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (clean.length < 8) return '';
   const words = clean.split(' ').filter((w) => w.length > 0);
+  if (words.length < 2) return '';
+  const knownNoise = new Set(['?', '/help', 'help', 'exit', 'clear', 'cls', 'ls', 'dir', 'pwd', 'cd', 'whoami']);
+  if (knownNoise.has(words[0].toLowerCase())) return '';
   const meaningful = words.slice(0, 7);
   let title = meaningful.join(' ');
   if (title.length > 42) {
     title = title.slice(0, 42).replace(/\s\S*$/, '');
   }
   title = title.charAt(0).toUpperCase() + title.slice(1);
-  return title || 'Chat';
+  return title || '';
 }
 
 const AgentPanel: React.FC<AgentPanelProps> = ({
@@ -65,6 +70,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   onWrite,
   onStop,
   onRestart,
+  onStart,
   onChangedFileClick,
   onStageFile,
   onUnstageFile,
@@ -78,11 +84,12 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [commitMessage, setCommitMessage] = useState('');
   const [committing, setCommitting] = useState(false);
-  const [changesExpanded, setChangesExpanded] = useState(true);
+  const [changesExpanded, setChangesExpanded] = useState(false);
   const inputLineRef = useRef('');
   const renamedRef = useRef(false);
 
   const isOwnAgentRunning = runningSessionId === sessionId && status === 'running';
+  const otherChatRunning = !!runningSessionId && runningSessionId !== sessionId;
 
   const statusLabel = status === 'running'
     ? 'Running'
@@ -90,6 +97,8 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     ? 'Starting...'
     : status === 'exited'
     ? `Exited${exitCode !== null && exitCode >= 0 ? ` (${exitCode})` : ''}`
+    : status === 'error'
+    ? 'Error'
     : 'Idle';
 
   const handleCommit = useCallback(async () => {
@@ -160,6 +169,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(containerRef.current);
+    term.focus();
 
     if (terminalBuffer) {
       term.write(terminalBuffer);
@@ -172,7 +182,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
         if (ch === '\r') {
           const line = inputLineRef.current;
           inputLineRef.current = '';
-          if (line.length > 0 && !renamedRef.current && sessionLabel && /^Chat \d+$/.test(sessionLabel)) {
+          if (line.length >= 8 && !renamedRef.current && sessionLabel && /^Chat \d+$/.test(sessionLabel)) {
             const title = buildChatTitle(line);
             if (title.length > 0 && title !== 'Chat') {
               renamedRef.current = true;
@@ -206,6 +216,12 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     }
   }, []);
 
+  const focusTerminal = useCallback(() => {
+    if (terminalRef.current) {
+      terminalRef.current.focus();
+    }
+  }, []);
+
   useEffect(() => {
     onXtermWriteReady(sessionId, null);
     destroyTerminal();
@@ -230,8 +246,10 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     };
   }, [syncResize]);
 
-  const hasChanges = changedFiles.length > 0 || (gitStatus && (gitStatus.files.length > 0 || gitStatus.isRepo));
-  const hasChangedFiles = changedFiles.length > 0;
+  const hasAgentChanges = changedFiles.length > 0;
+  const hasGitChanges = !!(gitStatus?.isRepo && gitStatus.files.length > 0);
+  const shouldShowChangesPanel = hasAgentChanges || hasGitChanges;
+  const hasStagedFiles = gitStatus?.isRepo && gitStatus.files.some((f) => f.staged);
 
   return (
     <div className="agent-panel">
@@ -254,14 +272,14 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
               </button>
             </>
           )}
-          {!isOwnAgentRunning && runningSessionId && runningSessionId !== sessionId && (
+          {otherChatRunning && (
             <span className="agent-blocked-hint">
               Agent running in another chat
             </span>
           )}
-          {!runningSessionId && status !== 'running' && (
-            <button className="agent-action-btn" onClick={onRestart} title="Restart Agent">
-              <RotateCcw size={13} />
+          {!runningSessionId && status !== 'running' && status !== 'error' && (
+            <button className="agent-action-btn agent-start-btn" onClick={onStart} title="Start Agent">
+              <Play size={13} />
             </button>
           )}
         </div>
@@ -274,22 +292,22 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
         </div>
       )}
 
-      {hasChanges && (
-        <div className="agent-changes-panel">
+      {shouldShowChangesPanel && (
+        <div className="agent-changes-panel" data-cy="changes-panel">
           <button
             className="agent-changes-toggle"
             onClick={() => setChangesExpanded((v) => !v)}
           >
             {changesExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             <span className="agent-changes-toggle-label">
-              Changes{hasChangedFiles ? `: ${changedFiles.length} file${changedFiles.length !== 1 ? 's' : ''}` : ''}
-              {!hasChangedFiles && gitStatus?.files.length ? ` (${gitStatus.files.length} git)` : ''}
+              Changes{hasAgentChanges ? `: ${changedFiles.length} file${changedFiles.length !== 1 ? 's' : ''}` : ''}
+              {!hasAgentChanges && hasGitChanges ? ` (${gitStatus!.files.length} git)` : ''}
             </span>
           </button>
 
           {changesExpanded && (
             <div className="agent-changes-content">
-              {hasChangedFiles && (
+              {hasAgentChanges && (
                 <div className="agent-changed-files">
                   <div className="agent-changed-title">AGENT CHANGES</div>
                   <div className="agent-changed-list">
@@ -347,19 +365,20 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
                 </div>
               )}
 
-              {gitStatus && gitStatus.isRepo && (
+              {changesExpanded && hasGitChanges && (
                 <div className="agent-commit-bar">
+                  <span className="git-commit-section-label">Commit</span>
                   <input
                     className="git-commit-input"
                     type="text"
-                    placeholder="Commit message"
+                    placeholder={hasStagedFiles ? "Commit message" : "Stage files to commit"}
                     value={commitMessage}
                     onChange={(e) => setCommitMessage(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleCommit(); }}
                   />
                   <button
                     className="git-commit-btn"
-                    disabled={!gitStatus.files.some((f) => f.staged) || !commitMessage.trim() || committing}
+                    disabled={!hasStagedFiles || !commitMessage.trim() || committing}
                     onClick={handleCommit}
                     title="Commit"
                   >
@@ -372,7 +391,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
         </div>
       )}
 
-      <div className="agent-terminal-container" ref={containerRef} />
+      <div className="agent-terminal-container" ref={containerRef} onClick={focusTerminal} />
 
       {!terminalBuffer && status === 'idle' && !isOwnAgentRunning && (
         <div className="agent-content">
@@ -383,9 +402,9 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
             </p>
             <p className="agent-empty-sub">
               {hasProject
-                ? runningSessionId && runningSessionId !== sessionId
+                ? otherChatRunning
                   ? 'Agent is running in another chat.'
-                  : 'Click Restart to start the agent.'
+                  : 'Click Start Agent to start.'
                 : 'Open a folder to start the agent.'}
             </p>
           </div>

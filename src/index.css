@@ -874,6 +874,15 @@ body {
   color: var(--text-primary);
 }
 
+.agent-start-btn {
+  color: #a6e3a1;
+}
+
+.agent-start-btn:hover {
+  color: #a6e3a1;
+  background: rgba(166, 227, 161, 0.12);
+}
+
 .agent-content {
   flex: 1;
   display: flex;
@@ -1115,6 +1124,15 @@ body {
   padding: 6px 8px;
   border-top: 1px solid var(--border-subtle);
   flex-shrink: 0;
+}
+
+.git-commit-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  flex-shrink: 0;
+  padding-right: 4px;
 }
 
 .git-commit-input {

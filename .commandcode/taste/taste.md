@@ -23,6 +23,7 @@
 - Avoid broad refactors when adding features; make minimal, targeted changes. Confidence: 0.85
 - After making code changes, run npm run build to verify the build passes before marking work as complete. Confidence: 0.70
 - For new feature areas, build the UI shell/mock first before wiring up real backend or persistent storage. Confidence: 0.65
+- After completing changes, provide a summary with three sections: changed files list, commands/tests run, and remaining limitations. Confidence: 0.75
 
 # ux-architecture
 - Design UI with agent/chat as the primary center experience, editor/diff as a secondary pane, collapsible file explorer as a right-side drawer, and a left session rail with project/session navigation (Codex-style layout). Confidence: 0.70

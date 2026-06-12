@@ -95,7 +95,7 @@ export interface AgentExitEvent {
   exitCode: number;
 }
 
-export type AgentStatus = 'idle' | 'starting' | 'running' | 'exited';
+export type AgentStatus = 'idle' | 'starting' | 'running' | 'exited' | 'error';
 
 export interface SessionRuntimeState {
   agentStatus: AgentStatus;
@@ -116,7 +116,7 @@ export interface ElectronAPI {
   saveFile: (filePath: string, content: string) => Promise<{ success: boolean }>;
   startAgent: (sessionId: string) => Promise<AgentStartResult>;
   writeAgent: (input: string) => Promise<{ success: boolean }>;
-  stopAgent: () => Promise<{ success: boolean }>;
+  stopAgent: (sessionId?: string) => Promise<{ success: boolean; error?: string }>;
   restartAgent: (sessionId: string) => Promise<AgentStartResult>;
   getAgentStatus: () => Promise<AgentStatusResult>;
   onAgentData: (cb: (event: AgentDataEvent) => void) => () => void;

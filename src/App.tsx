@@ -58,6 +58,7 @@ const App: React.FC = () => {
   activeDiffRef.current = activeDiff;
   const fsListenerRef = useRef<(() => void) | null>(null);
   const agentListenersRef = useRef<(() => void)[]>([]);
+  const agentListenersAttachedRef = useRef(false);
   const agentHasRunRef = useRef(false);
   const xtermWriteRef = useRef<{ sessionId: string | null; write: ((data: string) => void) | null }>({ sessionId: null, write: null });
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -103,6 +104,7 @@ const App: React.FC = () => {
   const cleanAgentListeners = useCallback(() => {
     agentListenersRef.current.forEach((fn) => fn());
     agentListenersRef.current = [];
+    agentListenersAttachedRef.current = false;
   }, []);
 
   const cleanAllListeners = useCallback(() => {
@@ -136,13 +138,34 @@ const App: React.FC = () => {
       if (status.running && status.sessionId) {
         setRunningAgentSessionId(status.sessionId);
         updateSessionRuntime(status.sessionId, { agentStatus: 'running', exitCode: null });
+        setSessionRuntime((prev) => {
+          const next = { ...prev };
+          for (const [sid, rt] of Object.entries(next)) {
+            if (sid !== status.sessionId && (rt.agentStatus === 'running' || rt.agentStatus === 'starting')) {
+              next[sid] = { ...rt, agentStatus: 'idle' };
+            }
+          }
+          return next;
+        });
       } else {
         setRunningAgentSessionId(null);
+        setSessionRuntime((prev) => {
+          const next = { ...prev };
+          for (const [sid, rt] of Object.entries(next)) {
+            if (rt.agentStatus === 'running' || rt.agentStatus === 'starting') {
+              next[sid] = { ...rt, agentStatus: 'idle' };
+            }
+          }
+          return next;
+        });
       }
     } catch {}
   }, [updateSessionRuntime]);
 
   const setupAgentListeners = useCallback(() => {
+    if (agentListenersAttachedRef.current) return;
+    agentListenersAttachedRef.current = true;
+
     cleanAgentListeners();
 
     const unsubData = window.electronAPI.onAgentData(({ sessionId, data }) => {
@@ -629,14 +652,15 @@ const App: React.FC = () => {
 
     const result = await window.electronAPI.startAgent(sessionId);
     if (!result.success) {
-      updateSessionRuntime(sessionId, { agentStatus: 'idle', error: result.error ?? 'Failed to start agent.' });
+      updateSessionRuntime(sessionId, { agentStatus: 'error', error: result.error ?? 'Failed to start agent.' });
       cleanAgentListeners();
       return;
     }
 
     updateSessionRuntime(sessionId, { agentStatus: 'running', exitCode: null });
     setRunningAgentSessionId(sessionId);
-  }, [setupAgentListeners, cleanAgentListeners, updateSessionRuntime]);
+    await reconcileAgentStatus();
+  }, [setupAgentListeners, cleanAgentListeners, updateSessionRuntime, reconcileAgentStatus]);
 
   const handleWriteAgent = useCallback(async (input: string) => {
     const runningId = runningAgentSessionIdRef.current;
@@ -651,9 +675,9 @@ const App: React.FC = () => {
 
   const handleStopAgent = useCallback(async () => {
     try {
-      await window.electronAPI.stopAgent();
-      cleanAgentListeners();
       const runningId = runningAgentSessionIdRef.current;
+      await window.electronAPI.stopAgent(runningId ?? undefined);
+      cleanAgentListeners();
       setRunningAgentSessionId(null);
       if (runningId) {
         updateSessionRuntime(runningId, { agentStatus: 'idle' });
@@ -681,12 +705,13 @@ const App: React.FC = () => {
     setupAgentListeners();
     const result = await window.electronAPI.restartAgent(activeId);
     if (!result.success) {
-      updateSessionRuntime(activeId, { agentStatus: 'idle', error: result.error ?? 'Failed to restart agent.' });
+      updateSessionRuntime(activeId, { agentStatus: 'error', error: result.error ?? 'Failed to restart agent.' });
       cleanAgentListeners();
       return;
     }
     updateSessionRuntime(activeId, { agentStatus: 'running', exitCode: null });
     setRunningAgentSessionId(activeId);
+    await reconcileAgentStatus();
   }, [setupAgentListeners, cleanAgentListeners, updateSessionRuntime]);
 
   const handleRenameSession = useCallback((sessionId: string, newLabel: string) => {
@@ -773,6 +798,7 @@ const App: React.FC = () => {
                 onWrite={handleWriteAgent}
                 onStop={handleStopAgent}
                 onRestart={handleRestartAgent}
+                onStart={() => activeSessionId && handleStartAgent(activeSessionId)}
                 onChangedFileClick={handleChangedFileClick}
                 onStageFile={handleStageFile}
                 onUnstageFile={handleUnstageFile}

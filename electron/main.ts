@@ -241,10 +241,11 @@ function resolveCommandCode(): { command: string; args: string[] } | null {
       return { command: lines[0].trim(), args: [] };
     }
   } catch {
-    // Not found via which/where - fall back to direct name
+    // Not found via which/where
+    return null;
   }
 
-  return { command: executable, args: [] };
+  return null;
 }
 
 function startAgent(sessionId: string): { success: boolean; error?: string } {
@@ -267,7 +268,7 @@ function startAgent(sessionId: string): { success: boolean; error?: string } {
 
   if (!cmdInfo) {
     agentSessionId = null;
-    return { success: false, error: 'Could not find command-code. Make sure Command Code CLI is installed and available in your PATH.' };
+    return { success: false, error: 'Command Code CLI not found. Install it and make sure command-code is in your PATH.' };
   }
 
   let shellCmd: string;
@@ -456,7 +457,10 @@ function setupIPC() {
     return { success: true };
   });
 
-  ipcMain.handle('agent:stop', async () => {
+  ipcMain.handle('agent:stop', async (_event, sessionId?: string) => {
+    if (sessionId && agentSessionId && agentSessionId !== sessionId) {
+      return { success: false, error: 'Cannot stop another session\'s agent.' };
+    }
     stopAgent();
     return { success: true };
   });
