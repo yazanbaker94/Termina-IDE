@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeAgent: (input: string) => ipcRenderer.invoke('agent:write', input),
   stopAgent: () => ipcRenderer.invoke('agent:stop'),
   restartAgent: (sessionId: string) => ipcRenderer.invoke('agent:restart', sessionId),
+  getAgentStatus: () => ipcRenderer.invoke('agent:getStatus'),
   onAgentData: (cb: (data: { sessionId: string; data: string }) => void) => {
     const handler = (_event: any, data: { sessionId: string; data: string }) => cb(data);
     ipcRenderer.on('agent:onData', handler);

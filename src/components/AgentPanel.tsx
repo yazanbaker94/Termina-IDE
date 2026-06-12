@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { StopCircle, RotateCcw, Clock, AlertTriangle, FilePlus, FileEdit, FileMinus, RefreshCw, PlusCircle, MinusCircle } from 'lucide-react';
+import { StopCircle, RotateCcw, Clock, AlertTriangle, FilePlus, FileEdit, FileMinus, RefreshCw, PlusCircle, MinusCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { FileChangeEvent, GitStatus, AgentStatus } from '../types';
 
 interface AgentPanelProps {
@@ -25,7 +25,7 @@ interface AgentPanelProps {
   onUnstageFile: (filePath: string) => void;
   onCommitGit: (message: string) => Promise<boolean>;
   onRefreshGit: () => void;
-  onXtermWriteReady: (writeFn: (data: string) => void) => void;
+  onXtermWriteReady: (sessionId: string, writeFn: ((data: string) => void) | null) => void;
 }
 
 function changeIcon(changeType: string) {
@@ -78,10 +78,19 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [commitMessage, setCommitMessage] = useState('');
   const [committing, setCommitting] = useState(false);
+  const [changesExpanded, setChangesExpanded] = useState(true);
   const inputLineRef = useRef('');
   const renamedRef = useRef(false);
 
-  const isOwnAgentRunning = status === 'running' && runningSessionId === sessionId;
+  const isOwnAgentRunning = runningSessionId === sessionId && status === 'running';
+
+  const statusLabel = status === 'running'
+    ? 'Running'
+    : status === 'starting'
+    ? 'Starting...'
+    : status === 'exited'
+    ? `Exited${exitCode !== null && exitCode >= 0 ? ` (${exitCode})` : ''}`
+    : 'Idle';
 
   const handleCommit = useCallback(async () => {
     const trimmed = commitMessage.trim();
@@ -89,9 +98,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     setCommitting(true);
     try {
       const ok = await onCommitGit(trimmed);
-      if (ok) {
-        setCommitMessage('');
-      }
+      if (ok) setCommitMessage('');
     } finally {
       setCommitting(false);
     }
@@ -158,22 +165,14 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
       term.write(terminalBuffer);
     }
 
-    setTimeout(() => {
-      syncResize();
-    }, 50);
+    setTimeout(() => syncResize(), 50);
 
     term.onData((data: string) => {
       for (const ch of data) {
         if (ch === '\r') {
           const line = inputLineRef.current;
           inputLineRef.current = '';
-
-          if (
-            line.length > 0 &&
-            !renamedRef.current &&
-            sessionLabel &&
-            /^Chat \d+$/.test(sessionLabel)
-          ) {
+          if (line.length > 0 && !renamedRef.current && sessionLabel && /^Chat \d+$/.test(sessionLabel)) {
             const title = buildChatTitle(line);
             if (title.length > 0 && title !== 'Chat') {
               renamedRef.current = true;
@@ -188,50 +187,41 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
           inputLineRef.current += ch;
         }
       }
-
       onWrite(data);
     });
 
     terminalRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    onXtermWriteReady((data: string) => {
-      if (terminalRef.current) {
-        terminalRef.current.write(data);
-      }
+    onXtermWriteReady(sessionId, (data: string) => {
+      if (terminalRef.current) terminalRef.current.write(data);
     });
-  }, [onWrite, onXtermWriteReady, syncResize, terminalBuffer, sessionId, sessionLabel, onRenameSession]);
+  }, [onWrite, syncResize, terminalBuffer, sessionId, sessionLabel, onRenameSession, onXtermWriteReady]);
 
   const destroyTerminal = useCallback(() => {
     if (terminalRef.current) {
-      try {
-        terminalRef.current.dispose();
-      } catch (_) {}
+      try { terminalRef.current.dispose(); } catch (_) {}
       terminalRef.current = null;
       fitAddonRef.current = null;
     }
   }, []);
 
   useEffect(() => {
-    if (isOwnAgentRunning) {
-      if (terminalRef.current) destroyTerminal();
-      if (containerRef.current) initTerminal();
-    }
-    if (!isOwnAgentRunning && !terminalBuffer && terminalRef.current) {
-      destroyTerminal();
-    }
-  }, [isOwnAgentRunning, terminalBuffer, restartCount]);
-
-  useEffect(() => {
-    if (!isOwnAgentRunning && terminalBuffer && !terminalRef.current && containerRef.current) {
+    onXtermWriteReady(sessionId, null);
+    destroyTerminal();
+    if (containerRef.current) {
       initTerminal();
     }
-  }, [isOwnAgentRunning, terminalBuffer]);
+    return () => {
+      onXtermWriteReady(sessionId, null);
+      destroyTerminal();
+    };
+  }, [sessionId, restartCount]);
 
   useEffect(() => {
-    const handleResize = () => { syncResize(); };
+    const handleResize = () => syncResize();
     window.addEventListener('resize', handleResize);
-    const observer = new ResizeObserver(() => { syncResize(); });
+    const observer = new ResizeObserver(() => syncResize());
     if (containerRef.current) observer.observe(containerRef.current);
     return () => {
       window.removeEventListener('resize', handleResize);
@@ -240,12 +230,19 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     };
   }, [syncResize]);
 
-  useEffect(() => { return () => { destroyTerminal(); }; }, [destroyTerminal]);
+  const hasChanges = changedFiles.length > 0 || (gitStatus && (gitStatus.files.length > 0 || gitStatus.isRepo));
+  const hasChangedFiles = changedFiles.length > 0;
 
   return (
     <div className="agent-panel">
       <div className="agent-header">
-        <span className="agent-title">{sessionLabel ? sessionLabel : 'AGENT'}</span>
+        <div className="agent-header-left">
+          <span className="agent-title">{sessionLabel ? sessionLabel : 'AGENT'}</span>
+          <span className={`agent-status-badge agent-status-${status}`}>
+            {statusLabel}
+            {isOwnAgentRunning && ' — PTY connected'}
+          </span>
+        </div>
         <div className="agent-header-actions">
           {isOwnAgentRunning && (
             <>
@@ -257,7 +254,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
               </button>
             </>
           )}
-          {runningSessionId && runningSessionId !== sessionId && (
+          {!isOwnAgentRunning && runningSessionId && runningSessionId !== sessionId && (
             <span className="agent-blocked-hint">
               Agent running in another chat
             </span>
@@ -277,113 +274,118 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
         </div>
       )}
 
-      {changedFiles.length > 0 && (
-        <div className="agent-changed-files">
-          <div className="agent-changed-title">CHANGED FILES</div>
-          <div className="agent-changed-list">
-            {changedFiles.map((evt) => (
-              <button
-                key={evt.path}
-                className={`agent-changed-item agent-changed-${evt.changeType}`}
-                onClick={() => onChangedFileClick(evt)}
-                title={evt.path}
-              >
-                <span className="agent-changed-icon">{changeIcon(evt.changeType)}</span>
-                <span className="agent-changed-name">
-                  {evt.path.split(/[\\/]/).pop() || evt.path}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {hasChanges && (
+        <div className="agent-changes-panel">
+          <button
+            className="agent-changes-toggle"
+            onClick={() => setChangesExpanded((v) => !v)}
+          >
+            {changesExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            <span className="agent-changes-toggle-label">
+              Changes{hasChangedFiles ? `: ${changedFiles.length} file${changedFiles.length !== 1 ? 's' : ''}` : ''}
+              {!hasChangedFiles && gitStatus?.files.length ? ` (${gitStatus.files.length} git)` : ''}
+            </span>
+          </button>
 
-      {gitStatus && gitStatus.isRepo && (
-        <div className="agent-changed-files">
-          <div className="agent-changed-title">
-            {gitStatus.branch ? `${gitStatus.branch}` : 'GIT'}
-            <button className="git-refresh-btn" onClick={onRefreshGit} title="Refresh git status">
-              <RefreshCw size={10} />
-            </button>
-          </div>
-          <div className="agent-changed-list">
-            {gitStatus.files.length === 0 && (
-              <div className="git-empty">Working tree clean</div>
-            )}
-            {gitStatus.files.map((f) => {
-              const hasStaged = f.staged;
-              const hasUnstaged = f.unstaged;
-              let statusClass = '';
-              if (f.untracked) statusClass = 'git-status-untracked';
-              else if (hasStaged && hasUnstaged) statusClass = 'git-status-modified';
-              else if (hasStaged) statusClass = 'git-status-staged';
-              else statusClass = 'git-status-modified';
-              return (
-                <div key={f.path} className="git-file-row">
-                  <span className={`git-status ${statusClass}`}>{f.status}</span>
-                  <span className="agent-changed-name" title={f.path}>{f.gitPath}</span>
-                  <div className="git-file-actions">
-                    {(hasUnstaged || f.untracked) && (
-                      <button className="git-action-btn" onClick={() => onStageFile(f.gitPath)} title="Stage">
-                        <PlusCircle size={10} />
+          {changesExpanded && (
+            <div className="agent-changes-content">
+              {hasChangedFiles && (
+                <div className="agent-changed-files">
+                  <div className="agent-changed-title">AGENT CHANGES</div>
+                  <div className="agent-changed-list">
+                    {changedFiles.map((evt) => (
+                      <button
+                        key={evt.path}
+                        className={`agent-changed-item agent-changed-${evt.changeType}`}
+                        onClick={() => onChangedFileClick(evt)}
+                        title={evt.path}
+                      >
+                        <span className="agent-changed-icon">{changeIcon(evt.changeType)}</span>
+                        <span className="agent-changed-name">{evt.path.split(/[\\/]/).pop() || evt.path}</span>
                       </button>
-                    )}
-                    {hasStaged && (
-                      <button className="git-action-btn" onClick={() => onUnstageFile(f.gitPath)} title="Unstage">
-                        <MinusCircle size={10} />
-                      </button>
-                    )}
+                    ))}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+              )}
 
-      {gitStatus && gitStatus.isRepo && (
-        <div className="agent-commit-bar">
-          <input
-            className="git-commit-input"
-            type="text"
-            placeholder="Commit message"
-            value={commitMessage}
-            onChange={(e) => setCommitMessage(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleCommit(); }}
-          />
-          <button
-            className="git-commit-btn"
-            disabled={!gitStatus.files.some((f) => f.staged) || !commitMessage.trim() || committing}
-            onClick={handleCommit}
-            title="Commit"
-          >
-            {committing ? '...' : 'Commit'}
-          </button>
+              {gitStatus && gitStatus.isRepo && (
+                <div className="agent-changed-files">
+                  <div className="agent-changed-title">
+                    {gitStatus.branch ?? 'GIT'}
+                    <button className="git-refresh-btn" onClick={onRefreshGit} title="Refresh git status">
+                      <RefreshCw size={10} />
+                    </button>
+                  </div>
+                  <div className="agent-changed-list">
+                    {gitStatus.files.length === 0 && (
+                      <div className="git-empty">Working tree clean</div>
+                    )}
+                    {gitStatus.files.map((f) => {
+                      const hasStaged = f.staged;
+                      const hasUnstaged = f.unstaged;
+                      let sc = '';
+                      if (f.untracked) sc = 'git-status-untracked';
+                      else if (hasStaged && hasUnstaged) sc = 'git-status-modified';
+                      else if (hasStaged) sc = 'git-status-staged';
+                      else sc = 'git-status-modified';
+                      return (
+                        <div key={f.path} className="git-file-row">
+                          <span className={`git-status ${sc}`}>{f.status}</span>
+                          <span className="agent-changed-name" title={f.path}>{f.gitPath}</span>
+                          <div className="git-file-actions">
+                            {(hasUnstaged || f.untracked) && (
+                              <button className="git-action-btn" onClick={() => onStageFile(f.gitPath)} title="Stage"><PlusCircle size={10} /></button>
+                            )}
+                            {hasStaged && (
+                              <button className="git-action-btn" onClick={() => onUnstageFile(f.gitPath)} title="Unstage"><MinusCircle size={10} /></button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {gitStatus && gitStatus.isRepo && (
+                <div className="agent-commit-bar">
+                  <input
+                    className="git-commit-input"
+                    type="text"
+                    placeholder="Commit message"
+                    value={commitMessage}
+                    onChange={(e) => setCommitMessage(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleCommit(); }}
+                  />
+                  <button
+                    className="git-commit-btn"
+                    disabled={!gitStatus.files.some((f) => f.staged) || !commitMessage.trim() || committing}
+                    onClick={handleCommit}
+                    title="Commit"
+                  >
+                    {committing ? '...' : 'Commit'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       <div className="agent-terminal-container" ref={containerRef} />
 
-      {status !== 'running' && !terminalBuffer && (
+      {!terminalBuffer && status === 'idle' && !isOwnAgentRunning && (
         <div className="agent-content">
           <div className="agent-empty">
-            <div className="agent-empty-icon">
-              <Clock size={32} />
-            </div>
+            <div className="agent-empty-icon"><Clock size={32} /></div>
             <p className="agent-empty-text">
-              {hasProject
-                ? status === 'exited'
-                  ? `Agent exited${exitCode !== null && exitCode >= 0 ? ` with code ${exitCode}` : ''}`
-                  : 'Agent not running'
-                : 'No folder open'}
+              {hasProject ? 'Agent not running' : 'No folder open'}
             </p>
             <p className="agent-empty-sub">
               {hasProject
-                ? status === 'exited'
-                  ? 'Click Restart to run again.'
-                  : runningSessionId && runningSessionId !== sessionId
-                    ? 'Agent is running in another chat.'
-                    : 'Click Restart to start the agent.'
+                ? runningSessionId && runningSessionId !== sessionId
+                  ? 'Agent is running in another chat.'
+                  : 'Click Restart to start the agent.'
                 : 'Open a folder to start the agent.'}
             </p>
           </div>

@@ -29,6 +29,12 @@ export interface AgentStartResult {
   error?: string;
 }
 
+export interface AgentStatusResult {
+  running: boolean;
+  sessionId: string | null;
+  pid?: number | null;
+}
+
 export interface FileChangeEvent {
   path: string;
   changeType: 'added' | 'changed' | 'deleted';
@@ -112,6 +118,7 @@ export interface ElectronAPI {
   writeAgent: (input: string) => Promise<{ success: boolean }>;
   stopAgent: () => Promise<{ success: boolean }>;
   restartAgent: (sessionId: string) => Promise<AgentStartResult>;
+  getAgentStatus: () => Promise<AgentStatusResult>;
   onAgentData: (cb: (event: AgentDataEvent) => void) => () => void;
   onAgentExit: (cb: (event: AgentExitEvent) => void) => () => void;
   onAgentError: (cb: (message: string) => void) => () => void;

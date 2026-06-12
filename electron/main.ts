@@ -250,7 +250,13 @@ function resolveCommandCode(): { command: string; args: string[] } | null {
 function startAgent(sessionId: string): { success: boolean; error?: string } {
   if (!rootPath) return { success: false, error: 'No project folder is open.' };
 
-  stopAgent();
+  if (agentPty) {
+    if (agentSessionId === sessionId) {
+      return { success: true };
+    }
+    return { success: false, error: 'Another agent is already running. Stop it before starting a new one.' };
+  }
+
   agentStopRequested = false;
   agentSessionId = sessionId;
   captureFileSnapshots(sessionId);
@@ -423,19 +429,30 @@ function setupIPC() {
     }
   });
 
+  ipcMain.handle('agent:getStatus', async () => {
+    return {
+      running: !!agentPty,
+      sessionId: agentSessionId ?? null,
+      pid: agentPty ? (agentPty as any).pid ?? null : null,
+    };
+  });
+
   ipcMain.handle('agent:start', async (_event, sessionId: string) => {
     if (!rootPath) {
       return { success: false, error: 'No project folder is open.' };
     }
     if (agentPty && agentSessionId && agentSessionId !== sessionId) {
-      return { success: false, error: `Agent is already running in another chat. Stop it before starting a new one.` };
+      return { success: false, error: 'Another agent is already running. Stop it first.' };
+    }
+    if (agentPty && agentSessionId === sessionId) {
+      return { success: true };
     }
     return startAgent(sessionId);
   });
 
-  ipcMain.handle('agent:write', async (_event, _input: string) => {
+  ipcMain.handle('agent:write', async (_event, input: string) => {
     if (!agentPty) return { success: false };
-    agentPty.write(_input);
+    agentPty.write(input);
     return { success: true };
   });
 
@@ -445,6 +462,9 @@ function setupIPC() {
   });
 
   ipcMain.handle('agent:restart', async (_event, sessionId: string) => {
+    if (agentPty && agentSessionId && agentSessionId !== sessionId) {
+      return { success: false, error: 'Another agent is running. You can only restart your own agent.' };
+    }
     stopAgent();
     return startAgent(sessionId);
   });
