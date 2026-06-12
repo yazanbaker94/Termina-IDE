@@ -78,6 +78,9 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   const inputLineRef = useRef('');
   const renamedRef = useRef(false);
 
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+
   const isOwnAgentRunning = status === 'running';
 
   const statusLabel = status === 'running'
@@ -211,8 +214,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
         <div className="agent-header-left">
           <span className="agent-title">{sessionLabel ? sessionLabel : 'AGENT'}</span>
           <span className={`agent-status-badge agent-status-${status}`}>
-            {statusLabel}
-            {isOwnAgentRunning && ' — PTY connected'}
+            {sessionId.slice(-6)} · {statusLabel}
           </span>
         </div>
       </div>

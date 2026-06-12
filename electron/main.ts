@@ -247,8 +247,10 @@ function resolveCommandCode(): { command: string; args: string[] } | null {
 }
 
 function startAgent(sessionId: string, cwd: string): { success: boolean; error?: string } {
+  console.log(`[PTY] start session=${sessionId} cwd=${cwd}`);
 
   if (agentPtys.has(sessionId)) {
+    console.log(`[PTY] start session=${sessionId} already running, idempotent`);
     return { success: true };
   }
 
@@ -284,7 +286,7 @@ function startAgent(sessionId: string, cwd: string): { success: boolean; error?:
       cwd: cwd,
       env: { ...process.env } as { [key: string]: string },
     });
-    console.log(`[agent] PTY started session=${sessionId} cwd=${cwd} pid=${(spawnedPty as any).pid}`);
+    console.log(`[PTY] started session=${sessionId} pid=${(spawnedPty as any).pid} cwd=${cwd}`);
   } catch (err: any) {
     sessionRoots.delete(sessionId);
     return { success: false, error: `Failed to spawn agent: ${err.message}` };
@@ -292,6 +294,7 @@ function startAgent(sessionId: string, cwd: string): { success: boolean; error?:
 
   agentPtys.set(sessionId, spawnedPty);
   agentStopRequested.set(sessionId, false);
+  console.log(`[PTY] running sessions=[${[...agentPtys.keys()].join(', ')}]`);
 
   const owningSession = sessionId;
 
@@ -301,7 +304,7 @@ function startAgent(sessionId: string, cwd: string): { success: boolean; error?:
 
   spawnedPty.onExit(({ exitCode }: { exitCode: number }) => {
     const wasStopRequested = agentStopRequested.get(owningSession);
-    console.log(`[agent] PTY exit session=${owningSession} exitCode=${exitCode} stopRequested=${wasStopRequested} cwd=${cwd}`);
+    console.log(`[PTY] exit session=${owningSession} exitCode=${exitCode} stopRequested=${wasStopRequested}`);
     if (wasStopRequested) {
       sendToRenderer('agent:onExit', { sessionId: owningSession, exitCode: -1 });
     } else {
@@ -310,6 +313,7 @@ function startAgent(sessionId: string, cwd: string): { success: boolean; error?:
     agentPtys.delete(owningSession);
     agentStopRequested.delete(owningSession);
     sessionRoots.delete(owningSession);
+    console.log(`[PTY] running sessions=[${[...agentPtys.keys()].join(', ')}]`);
   });
 
   return { success: true };
@@ -450,6 +454,7 @@ function setupIPC() {
 
   ipcMain.handle('agent:write', async (_event, sessionId: string, input: string) => {
     const p = agentPtys.get(sessionId);
+    console.log(`[PTY] write session=${sessionId} exists=${!!p}`);
     if (!p) return { success: false };
     p.write(input);
     return { success: true };
@@ -594,6 +599,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('project:openPath', async (_event, folderPath: string) => {
+    console.log(`[PTY] project switch to ${folderPath}, running=[${[...agentPtys.keys()].join(', ')}]`);
     try {
       const resolved = path.resolve(folderPath);
       if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
