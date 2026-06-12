@@ -17,11 +17,6 @@ interface AgentPanelProps {
   onRenameSession: (sessionId: string, newLabel: string) => void;
   onWrite: (input: string) => void;
   onChangedFileClick: (evt: FileChangeEvent) => void;
-  onAcceptFile: (filePath: string) => void;
-  onRejectFile: (filePath: string) => void;
-  onAcceptAll: () => void;
-  onRejectAll: () => void;
-  rejectingAll?: boolean;
   onXtermWriteReady: (sessionId: string, writeFn: ((data: string) => void) | null) => void;
 }
 
@@ -63,11 +58,6 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   onRenameSession,
   onWrite,
   onChangedFileClick,
-  onAcceptFile,
-  onRejectFile,
-  onAcceptAll,
-  onRejectAll,
-  rejectingAll,
   onXtermWriteReady,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -237,41 +227,18 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
 
           {changesExpanded && (
             <div className="agent-changes-content">
-              {rejectingAll && (
-                <div className="agent-review-status">Rejecting changes...</div>
-              )}
-              <div className="agent-changed-files">
-                <div className="agent-changed-title">
-                  AGENT CHANGES
-                  <div className="agent-changes-bulk">
-                    <button className="agent-review-btn accept" onClick={onAcceptAll} title="Accept All" disabled={rejectingAll}>
-                      <Check size={10} /> All
-                    </button>
-                    <button className="agent-review-btn reject" onClick={onRejectAll} title="Reject All" disabled={rejectingAll}>
-                      <X size={10} /> All
-                    </button>
-                  </div>
-                </div>
-                <div className="agent-changed-list">
-                  {changedFiles.map((evt) => (
-                    <div key={evt.path} className="agent-changed-item-row">
-                      <button
-                        className={`agent-changed-item agent-changed-${evt.changeType}`}
-                        onClick={() => onChangedFileClick(evt)}
-                        title={evt.path}
-                      >
-                        <span className="agent-changed-icon">{changeIcon(evt.changeType)}</span>
-                        <span className="agent-changed-name">{evt.path.split(/[\\/]/).pop() || evt.path}</span>
-                      </button>
-                      <button className="agent-review-btn accept" onClick={() => onAcceptFile(evt.path)} title="Accept" disabled={rejectingAll}>
-                        <Check size={10} />
-                      </button>
-                      <button className="agent-review-btn reject" onClick={() => onRejectFile(evt.path)} title="Reject" disabled={rejectingAll}>
-                        <X size={10} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
+              <div className="agent-changed-list">
+                {changedFiles.map((evt) => (
+                  <button
+                    key={evt.path}
+                    className={`agent-changed-item agent-changed-${evt.changeType}`}
+                    onClick={() => onChangedFileClick(evt)}
+                    title={evt.path}
+                  >
+                    <span className="agent-changed-icon">{changeIcon(evt.changeType)}</span>
+                    <span className="agent-changed-name">{evt.path.split(/[\\/]/).pop() || evt.path}</span>
+                  </button>
+                ))}
               </div>
             </div>
           )}

@@ -16,8 +16,8 @@
   --toolbar-height: 40px;
   --bottombar-height: 26px;
   --session-rail-width: 210px;
-  --editor-pane-width: 440px;
-  --files-drawer-width: 260px;
+  --code-pane-width: 420px;
+  --files-drawer-width: 300px;
 }
 
 * {
@@ -60,16 +60,62 @@ body {
   display: flex;
   flex: 1;
   min-width: 0;
+  position: relative;
+  overflow: hidden;
 }
 
-.app-editor-pane {
-  width: var(--editor-pane-width);
+/* ===== Code Review Pane (right side) ===== */
+
+.code-review-pane {
+  width: var(--code-pane-width);
   min-width: 280px;
   max-width: 600px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.code-review-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-primary);
+}
+
+.code-review-tabs {
+  display: flex;
+  align-items: center;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 4px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.code-review-tab-actions {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  padding-right: 4px;
+}
+
+.code-review-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
   border-right: 1px solid var(--border-subtle);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: default;
+}
+
+.code-review-tab.active {
+  border-bottom: 2px solid var(--accent);
+  background: var(--bg-primary);
 }
 
 .app-agent-pane {
@@ -219,6 +265,7 @@ body {
 
 .session-project-group {
   padding: 2px 0;
+  position: relative;
 }
 
 .session-project-row {
@@ -227,7 +274,7 @@ body {
   gap: 8px;
   width: 100%;
   height: 32px;
-  padding: 0 12px;
+  padding: 0 8px 0 12px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
@@ -246,6 +293,74 @@ body {
 .session-project-row.active {
   background: var(--accent-dim);
   color: var(--text-primary);
+}
+
+.session-project-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.session-project-row:hover .session-project-menu-btn {
+  display: flex;
+}
+
+.session-project-menu-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.session-context-menu {
+  position: absolute;
+  left: 12px;
+  right: 8px;
+  z-index: 30;
+  margin-top: 2px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.session-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s ease;
+  flex-wrap: wrap;
+}
+
+.session-context-menu-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.session-context-menu-hint {
+  width: 100%;
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.7;
+  padding-left: 20px;
 }
 
 .session-project-icon {
@@ -346,18 +461,36 @@ body {
   color: var(--text-primary);
 }
 
-/* ===== Files Drawer ===== */
+/* ===== Files Drawer (overlay) ===== */
+
+.files-drawer-overlay {
+  position: fixed;
+  top: var(--toolbar-height);
+  right: 0;
+  bottom: var(--bottombar-height);
+  left: 0;
+  z-index: 20;
+  pointer-events: all;
+}
 
 .files-drawer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
   width: var(--files-drawer-width);
-  min-width: var(--files-drawer-width);
-  max-width: var(--files-drawer-width);
   background: var(--bg-secondary);
   border-left: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  flex-shrink: 0;
+  box-shadow: -4px 0 12px rgba(0,0,0,0.3);
+  animation: files-drawer-slide-in 0.2s ease;
+}
+
+@keyframes files-drawer-slide-in {
+  from { transform: translateX(20px); opacity: 0.8; }
+  to { transform: translateX(0); opacity: 1; }
 }
 
 .files-drawer-header {
@@ -640,49 +773,7 @@ body {
   white-space: nowrap;
 }
 
-/* ===== Editor ===== */
-
-.editor-container {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  background: var(--bg-primary);
-}
-
-.editor-tabs {
-  display: flex;
-  align-items: center;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-subtle);
-  padding: 0 4px;
-  height: 32px;
-  flex-shrink: 0;
-}
-
-.editor-tab-actions {
-  display: flex;
-  align-items: center;
-  margin-left: auto;
-  padding-right: 4px;
-}
-
-.editor-tab {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border-right: 1px solid var(--border-subtle);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: 12px;
-  cursor: default;
-}
-
-.editor-tab.active {
-  border-bottom: 2px solid var(--accent);
-  background: var(--bg-primary);
-}
+/* ===== Editor (shared) ===== */
 
 .tab-icon {
   font-size: 13px;

@@ -1,14 +1,12 @@
 import React from 'react';
 import { DiffEditor } from '@monaco-editor/react';
-import { X, ExternalLink, Undo2, FilePlus, FileEdit, FileMinus, Check } from 'lucide-react';
+import { X, ExternalLink, FilePlus, FileEdit, FileMinus } from 'lucide-react';
 import { FileDiff } from '../types';
 
 interface DiffViewerProps {
   diff: FileDiff;
   onClose: () => void;
   onOpenFile: (filePath: string) => void;
-  onRevertFile: (filePath: string) => void;
-  onAcceptFile?: (filePath: string) => void;
 }
 
 function changeLabel(changeType: string) {
@@ -38,39 +36,23 @@ function changeClass(changeType: string) {
   }
 }
 
-const DiffViewer: React.FC<DiffViewerProps> = ({ diff, onClose, onOpenFile, onRevertFile, onAcceptFile }) => {
+const DiffViewer: React.FC<DiffViewerProps> = ({ diff, onClose, onOpenFile }) => {
   return (
-    <div className="editor-container">
-      <div className="editor-tabs">
-        <div className={`editor-tab diff-tab active ${changeClass(diff.changeType)}`}>
+    <div className="code-review-container">
+      <div className="code-review-tabs">
+        <div className={`code-review-tab diff-tab active ${changeClass(diff.changeType)}`}>
           <span className="tab-icon">{changeIcon(diff.changeType)}</span>
           <span className="tab-name">{diff.fileName}</span>
           <span className={`diff-badge ${changeClass(diff.changeType)}`}>
             {changeLabel(diff.changeType)}
           </span>
         </div>
-        <div className="editor-tab-actions">
-          {onAcceptFile && (
-            <button
-              className="panel-action-btn"
-              onClick={() => onAcceptFile(diff.filePath)}
-              title="Accept File — keep changes, remove from review list"
-            >
-              <Check size={13} />
-            </button>
-          )}
-          <button
-            className="panel-action-btn"
-            onClick={() => onRevertFile(diff.filePath)}
-            title="Reject File — restore file to pre-agent state"
-          >
-            <Undo2 size={13} />
-          </button>
+        <div className="code-review-tab-actions">
           {diff.changeType !== 'deleted' && (
             <button
               className="panel-action-btn"
               onClick={() => onOpenFile(diff.filePath)}
-              title="Open File — open this file in the editor"
+              title="Open File"
             >
               <ExternalLink size={13} />
             </button>
@@ -78,7 +60,7 @@ const DiffViewer: React.FC<DiffViewerProps> = ({ diff, onClose, onOpenFile, onRe
           <button
             className="panel-action-btn"
             onClick={onClose}
-            title="Close — dismiss diff view"
+            title="Close"
           >
             <X size={13} />
           </button>

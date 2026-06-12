@@ -52,7 +52,8 @@ const FilesDrawer: React.FC<FilesDrawerProps> = ({
   if (!visible) return null;
 
   return (
-    <div className="files-drawer">
+    <div className="files-drawer-overlay" onClick={onClose}>
+      <div className="files-drawer" onClick={(e) => e.stopPropagation()}>
       <div className="files-drawer-header">
         <span className="files-drawer-title">FILES</span>
         <div className="files-drawer-actions">
@@ -102,6 +103,7 @@ const FilesDrawer: React.FC<FilesDrawerProps> = ({
           />
         </div>
       )}
+    </div>
     </div>
   );
 };

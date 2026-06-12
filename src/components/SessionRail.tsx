@@ -1,5 +1,5 @@
-import React from 'react';
-import { MessageSquarePlus, FolderGit2, MessageSquare, FolderOpen } from 'lucide-react';
+import React, { useState } from 'react';
+import { MessageSquarePlus, FolderGit2, MessageSquare, FolderOpen, MoreHorizontal, X } from 'lucide-react';
 import { StoredProject, StoredSession } from '../data/store';
 import { SessionRuntimeState } from '../types';
 
@@ -14,6 +14,7 @@ interface SessionRailProps {
   onSelectSession: (sessionId: string) => void;
   onSelectProject: (project: StoredProject) => void;
   onOpenFolder: () => void;
+  onRemoveProject: (projectId: string) => void;
 }
 
 const statusColors: Record<string, string> = {
@@ -34,11 +35,12 @@ const SessionRail: React.FC<SessionRailProps> = ({
   onSelectSession,
   onSelectProject,
   onOpenFolder,
+  onRemoveProject,
 }) => {
-  const sortedProjects = [...projects].sort((a, b) => b.openedAt - a.openedAt);
+  const [contextProjectId, setContextProjectId] = useState<string | null>(null);
 
   return (
-    <div className="session-sidebar">
+    <div className="session-sidebar" onClick={() => setContextProjectId(null)}>
       <div className="session-sidebar-header">
         <button className="session-new-chat-btn" onClick={onNewChat} title="New Chat">
           <MessageSquarePlus size={16} />
@@ -47,7 +49,7 @@ const SessionRail: React.FC<SessionRailProps> = ({
       </div>
 
       <div className="session-sidebar-body">
-        {sortedProjects.length === 0 && !hasProject && (
+        {projects.length === 0 && !hasProject && (
           <div className="session-sidebar-empty">
             <p className="session-sidebar-empty-text">No recent projects</p>
             <button className="session-sidebar-open-btn" onClick={onOpenFolder}>
@@ -57,10 +59,10 @@ const SessionRail: React.FC<SessionRailProps> = ({
           </div>
         )}
 
-        {sortedProjects.map((p) => {
+        {projects.map((p) => {
           const isActiveProject = p.id === activeProjectId;
           return (
-            <div key={p.id} className="session-project-group">
+            <div key={p.id} className="session-project-group" onContextMenu={(e) => { e.preventDefault(); setContextProjectId(p.id); }}>
               <button
                 className={`session-project-row ${isActiveProject ? 'active' : ''}`}
                 onClick={() => onSelectProject(p)}
@@ -68,7 +70,24 @@ const SessionRail: React.FC<SessionRailProps> = ({
               >
                 <FolderGit2 size={14} className="session-project-icon" />
                 <span className="session-project-name">{p.name}</span>
+                <button
+                  className="session-project-menu-btn"
+                  onClick={(e) => { e.stopPropagation(); setContextProjectId(contextProjectId === p.id ? null : p.id); }}
+                  title="Project options"
+                >
+                  <MoreHorizontal size={12} />
+                </button>
               </button>
+
+              {contextProjectId === p.id && (
+                <div className="session-context-menu" onClick={(e) => e.stopPropagation()}>
+                  <button className="session-context-menu-item" onClick={() => { onRemoveProject(p.id); setContextProjectId(null); }}>
+                    <X size={12} />
+                    <span>Remove Folder from Sidebar</span>
+                    <span className="session-context-menu-hint">Does not delete files from disk</span>
+                  </button>
+                </div>
+              )}
 
               {isActiveProject && (
                 <div className="session-sessions-list">
@@ -102,10 +121,10 @@ const SessionRail: React.FC<SessionRailProps> = ({
         })}
       </div>
 
-      <div className="session-sidebar-footer">
-      </div>
+      <div className="session-sidebar-footer" />
     </div>
   );
 };
 
 export default SessionRail;
+

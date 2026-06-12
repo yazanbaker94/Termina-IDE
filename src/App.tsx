@@ -540,7 +540,54 @@ const App: React.FC = () => {
     finally { setIsLoading(false); }
   }, [activeSessionId]);
 
-  const handleCloseDiff = useCallback(() => setActiveDiff(null), []);
+  const handleCloseFile = useCallback(() => {
+    const dirty = activeFile ? activeFile.content !== savedContent : false;
+    if (dirty) {
+      if (!window.confirm('Close without saving?')) return;
+    }
+    setActiveFile(null);
+    setSavedContent('');
+    setActiveDiff(null);
+  }, [activeFile, savedContent]);
+
+  const handleRemoveProject = useCallback(async (projectId: string) => {
+    // Stop PTYs for this project's sessions
+    const projectSessions = sessions.filter((s) => s.projectId === projectId);
+    for (const s of projectSessions) {
+      try { await window.electronAPI.stopAgent(s.id); } catch {}
+    }
+    // Clean up runtime state
+    const cleanedRuntime = { ...sessionRuntimeRef.current };
+    for (const s of projectSessions) {
+      delete cleanedRuntime[s.id];
+    }
+    setSessionRuntime(cleanedRuntime);
+    // Remove sessions
+    const remainingSessions = sessionsRef.current.filter((s) => s.projectId !== projectId);
+    setSessions(remainingSessions);
+    // Remove project from persisted state
+    const updatedProjects = appData.projects.filter((p) => p.id !== projectId);
+    const newActiveId = projectId === activeProjectId
+      ? (updatedProjects.length > 0 ? updatedProjects[0].id : null)
+      : activeProjectId;
+    const newData = { projects: updatedProjects, activeProjectId: newActiveId };
+    setAppData(newData);
+    saveAppData(newData);
+    if (projectId === activeProjectId) {
+      if (newActiveId) {
+        handleSelectProject(updatedProjects.find((p) => p.id === newActiveId)!);
+      } else {
+        setActiveSessionId(null);
+        setHasProject(false);
+        setRootPath(null);
+        setRootTree(null);
+        setProjectName(null);
+        setActiveFile(null);
+        setSavedContent('');
+        setActiveDiff(null);
+      }
+    }
+  }, [projects, activeProjectId, sessions, appData, handleSelectProject]);
 
   const handleOpenFile = useCallback(async (filePath: string) => {
     setIsLoading(true);
@@ -671,7 +718,7 @@ const App: React.FC = () => {
         <SessionRail projects={projects} sessions={activeProjectSessions} activeProjectId={activeProjectId} activeSessionId={activeSessionId}
           hasProject={hasProject} sessionRuntime={sessionRuntime}
           onNewChat={handleNewChat} onSelectSession={handleSelectSession} onSelectProject={handleSelectProject}
-          onOpenFolder={handleOpenFolder} />
+          onOpenFolder={handleOpenFolder} onRemoveProject={handleRemoveProject} />
 
         <div className="app-main">
           {hasProject && !activeSessionId && (
@@ -679,16 +726,6 @@ const App: React.FC = () => {
               <div className="app-no-session-icon"><MessageSquarePlus size={40} /></div>
               <p className="app-no-session-text">No active chat session</p>
               <p className="app-no-session-sub">Start a new chat to begin working with the agent.</p>
-            </div>
-          )}
-
-          {activeSessionId && showEditor && (
-            <div className="app-editor-pane">
-              {activeDiff ? (
-                <DiffViewer diff={activeDiff} onClose={handleCloseDiff} onOpenFile={handleOpenFile} onRevertFile={handleRejectFile} onAcceptFile={handleAcceptFile} />
-              ) : (
-                <Editor file={activeFile} isLoading={isLoading} isDirty={isDirty} hasProject={hasProject} onChange={handleEditorChange} onSave={handleSave} />
-              )}
             </div>
           )}
 
@@ -701,9 +738,18 @@ const App: React.FC = () => {
                 hasProject={hasProject} sessionLabel={activeSession?.label ?? null}
                 onRenameSession={handleRenameSession}
                 onWrite={(input) => handleWriteAgent(activeSessionId, input)}
-                onChangedFileClick={handleChangedFileClick} onAcceptFile={handleAcceptFile} onRejectFile={handleRejectFile}
-                onAcceptAll={handleAcceptAll} onRejectAll={handleRejectAll} rejectingAll={rejectingAll}
+                onChangedFileClick={handleChangedFileClick}
                 onXtermWriteReady={handleXtermWriteReady} />
+            </div>
+          )}
+
+          {activeSessionId && showEditor && (
+            <div className="code-review-pane">
+              {activeDiff ? (
+                <DiffViewer diff={activeDiff} onClose={() => setActiveDiff(null)} onOpenFile={handleOpenFile} />
+              ) : (
+                <Editor file={activeFile} isLoading={isLoading} isDirty={isDirty} hasProject={hasProject} onChange={handleEditorChange} onSave={handleSave} onClose={handleCloseFile} />
+              )}
             </div>
           )}
         </div>

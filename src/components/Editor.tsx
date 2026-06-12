@@ -1,7 +1,7 @@
 import React, { useRef, useCallback } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
-import { FileCode, FileCode2, File, Paintbrush, Save, FolderOpen } from 'lucide-react';
+import { FileCode, FileCode2, File, Paintbrush, X } from 'lucide-react';
 import { FileState } from '../types';
 
 interface EditorPanelProps {
@@ -11,6 +11,7 @@ interface EditorPanelProps {
   hasProject: boolean;
   onChange: (content: string | undefined) => void;
   onSave: () => void;
+  onClose: () => void;
 }
 
 const extIcons: Record<string, React.ReactNode> = {
@@ -31,6 +32,7 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
   hasProject,
   onChange,
   onSave,
+  onClose,
 }) => {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const onSaveRef = useRef(onSave);
@@ -38,7 +40,6 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
 
   const handleMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
-
     editor.addAction({
       id: 'command-code-save',
       label: 'Save File',
@@ -51,48 +52,30 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
 
   if (!file || !file.path) {
     return (
-      <div className="editor-container">
+      <div className="code-review-container">
         <div className="editor-empty">
           <div className="editor-empty-icon">
-            {hasProject ? (
-              <File size={40} />
-            ) : (
-              <FolderOpen size={40} />
-            )}
+            <File size={40} />
           </div>
-          <p className="editor-empty-text">
-            {hasProject
-              ? 'Select a file to start editing'
-              : 'Open a folder to get started'}
-          </p>
-          <p className="editor-empty-sub">
-            {hasProject
-              ? 'Choose a file from the explorer sidebar.'
-              : 'Use the Open Folder button or File > Open Folder.'}
-          </p>
+          <p className="editor-empty-text">Select a file to start editing</p>
+          <p className="editor-empty-sub">Choose a file from the file explorer.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="editor-container">
-      <div className="editor-tabs">
-        <div className="editor-tab active">
+    <div className="code-review-container">
+      <div className="code-review-tabs">
+        <div className="code-review-tab active">
           <span className="tab-icon">{getFileIcon(file.name)}</span>
           <span className="tab-name">{file.name}</span>
           {isDirty && <span className="tab-dirty" />}
         </div>
-        <div className="editor-tab-actions">
-          {hasProject && (
-            <button
-              className={`editor-save-btn ${isDirty ? 'dirty' : ''}`}
-              onClick={onSave}
-              title="Save (Ctrl+S)"
-            >
-              <Save size={13} />
-            </button>
-          )}
+        <div className="code-review-tab-actions">
+          <button className="panel-action-btn" onClick={onClose} title="Close file">
+            <X size={13} />
+          </button>
         </div>
       </div>
       <div className="editor-main">
