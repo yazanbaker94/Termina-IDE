@@ -88,6 +88,8 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
 
   const isOwnAgentRunning = runningSessionId === sessionId && status === 'running';
   const otherChatRunning = !!runningSessionId && runningSessionId !== sessionId;
+  const isReadOnlyTranscript = !!terminalBuffer && !isOwnAgentRunning;
+  const [showStartHint, setShowStartHint] = useState(false);
 
   const statusLabel = status === 'running'
     ? 'Running'
@@ -97,6 +99,8 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     ? `Exited${exitCode !== null && exitCode >= 0 ? ` (${exitCode})` : ''}`
     : status === 'error'
     ? 'Error'
+    : isReadOnlyTranscript
+    ? 'Saved transcript'
     : 'Idle';
 
   const syncResize = useCallback(() => {
@@ -145,6 +149,10 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     setTimeout(() => syncResize(), 50);
 
     term.onData((data: string) => {
+      if (!isOwnAgentRunning) {
+        setShowStartHint(true);
+        return;
+      }
       for (const ch of data) {
         if (ch === '\r') {
           const line = inputLineRef.current;
@@ -300,6 +308,13 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
       )}
 
       <div className="agent-terminal-container" ref={containerRef} onClick={focusTerminal} />
+
+      {showStartHint && isReadOnlyTranscript && (
+        <div className="agent-start-hint-overlay" onClick={() => { setShowStartHint(false); onStart(); }}>
+          <Play size={14} />
+          <span>Start Agent to continue</span>
+        </div>
+      )}
 
       {!terminalBuffer && status === 'idle' && !isOwnAgentRunning && (
         <div className="agent-content">

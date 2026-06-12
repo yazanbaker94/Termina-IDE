@@ -43,7 +43,26 @@ const App: React.FC = () => {
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [filesDrawerVisible, setFilesDrawerVisible] = useState(false);
 
-  const [sessionRuntime, setSessionRuntime] = useState<Record<string, SessionRuntimeState>>({});
+  const [sessionRuntime, setSessionRuntime] = useState<Record<string, SessionRuntimeState>>(() => {
+    const initial = loadAppData();
+    const restored: Record<string, SessionRuntimeState> = {};
+    if (initial.sessionRuntime) {
+      for (const [sid, rt] of Object.entries(initial.sessionRuntime)) {
+        restored[sid] = {
+          agentStatus: (rt.agentStatus as SessionRuntimeState['agentStatus']) ?? 'idle',
+          exitCode: rt.exitCode ?? null,
+          error: rt.error ?? '',
+          terminalBuffer: rt.terminalBuffer ?? '',
+          changedFiles: [],
+          restartCount: 0,
+          activeFilePath: null,
+          activeFileName: null,
+          diffPath: null,
+        };
+      }
+    }
+    return restored;
+  });
   const [runningAgentSessionId, setRunningAgentSessionId] = useState<string | null>(null);
   const [rejectingAll, setRejectingAll] = useState(false);
 
@@ -116,8 +135,8 @@ const App: React.FC = () => {
 
   const persist = useCallback((data: AppData) => {
     setAppData(data);
-    saveAppData(data);
-  }, []);
+    saveAppData(data, sessionRuntime);
+  }, [sessionRuntime]);
 
   const updateSessionRuntime = useCallback((sessionId: string, update: Partial<SessionRuntimeState>) => {
     setSessionRuntime((prev) => {
@@ -692,12 +711,10 @@ const App: React.FC = () => {
   }, [setupAgentListeners, cleanAgentListeners, updateSessionRuntime, reconcileAgentStatus]);
 
   const handleRenameSession = useCallback((sessionId: string, newLabel: string) => {
-    setAppData((prev) => {
-      const updated = { ...prev, sessions: prev.sessions.map((s) => s.id === sessionId ? { ...s, label: newLabel, renamedFromPrompt: true, updatedAt: Date.now() } : s) };
-      saveAppData(updated);
-      return updated;
-    });
-  }, []);
+    const updated = { ...appData, sessions: appData.sessions.map((s) => s.id === sessionId ? { ...s, label: newLabel, renamedFromPrompt: true, updatedAt: Date.now() } : s) };
+    setAppData(updated);
+    saveAppData(updated, sessionRuntime);
+  }, [appData, sessionRuntime]);
 
   const handleXtermWriteReady = useCallback((sessionId: string, writeFn: ((data: string) => void) | null) => {
     xtermWriteRef.current = { sessionId, write: writeFn };
