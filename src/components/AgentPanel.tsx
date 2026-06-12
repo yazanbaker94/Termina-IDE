@@ -79,8 +79,6 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   const renamedRef = useRef(false);
 
   const isOwnAgentRunning = status === 'running';
-  const isOwnAgentRunningRef = useRef(isOwnAgentRunning);
-  isOwnAgentRunningRef.current = isOwnAgentRunning;
 
   const statusLabel = status === 'running'
     ? 'Running'
@@ -138,7 +136,6 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     setTimeout(() => syncResize(), 50);
 
     term.onData((data: string) => {
-      if (!isOwnAgentRunningRef.current) return;
       for (const ch of data) {
         if (ch === '\r') {
           const line = inputLineRef.current;

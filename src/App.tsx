@@ -141,13 +141,13 @@ const App: React.FC = () => {
   const cleanAgentListeners = useCallback(() => {
     agentListenersRef.current.forEach((fn) => fn());
     agentListenersRef.current = [];
-    agentListenersAttachedRef.current = false;
   }, []);
 
   const cleanAllListeners = useCallback(() => {
     fsListenerRef.current?.();
     fsListenerRef.current = null;
     cleanAgentListeners();
+    agentListenersAttachedRef.current = false;
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
   }, [cleanAgentListeners]);
 
@@ -191,8 +191,6 @@ const App: React.FC = () => {
     if (agentListenersAttachedRef.current) return;
     agentListenersAttachedRef.current = true;
 
-    cleanAgentListeners();
-
     const unsubData = window.electronAPI.onAgentData(({ sessionId, data }) => {
       appendTerminalBuffer(sessionId, data);
       if (
@@ -211,7 +209,7 @@ const App: React.FC = () => {
     });
 
     agentListenersRef.current = [unsubData, unsubExit];
-  }, [cleanAgentListeners, appendTerminalBuffer, updateSessionRuntime]);
+  }, [appendTerminalBuffer, updateSessionRuntime]);
 
   const startAgentWithListeners = useCallback(async (sessionId: string, cwd: string) => {
     updateSessionRuntime(sessionId, { agentStatus: 'starting', error: '', changedFiles: [], restartCount: (sessionRuntimeRef.current[sessionId]?.restartCount ?? 0) + 1 });
