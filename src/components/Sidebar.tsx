@@ -10,6 +10,7 @@ interface SidebarProps {
   onFileSelect: (node: FileNode) => void;
   onRefreshTree: () => void;
   onOpenFolder: () => void;
+  onCloseActiveFile?: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -19,6 +20,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onFileSelect,
   onRefreshTree,
   onOpenFolder,
+  onCloseActiveFile,
 }) => {
   return (
     <div className="sidebar">
@@ -47,6 +49,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             activeFilePath={activeFilePath}
             onFileSelect={onFileSelect}
             onRefreshTree={onRefreshTree}
+            onCloseActiveFile={onCloseActiveFile}
           />
         </div>
       )}

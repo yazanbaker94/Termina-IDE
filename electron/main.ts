@@ -39,6 +39,36 @@ interface FileNode {
 
 let fileCount = 0;
 
+function copyFilesToDir(resolvedDir: string, sourcePaths: string[]): { success: boolean; error?: string; path?: string; count?: number } {
+  let count = 0;
+  for (const src of sourcePaths) {
+    try {
+      const srcName = path.basename(src);
+      let dest = path.join(resolvedDir, srcName);
+      if (fs.existsSync(dest)) {
+        const ext = path.extname(srcName);
+        const base = path.basename(srcName, ext);
+        let copyName = `${base} copy${ext}`;
+        let copyIdx = 2;
+        while (fs.existsSync(path.join(resolvedDir, copyName))) {
+          copyName = `${base} copy ${copyIdx}${ext}`;
+          copyIdx++;
+        }
+        dest = path.join(resolvedDir, copyName);
+      }
+      const stat = fs.statSync(src);
+      if (stat.isDirectory()) {
+        fs.cpSync(src, dest, { recursive: true, errorOnExist: false });
+      } else {
+        fs.copyFileSync(src, dest);
+      }
+      count++;
+    } catch (e) { console.log('[copy] failed:', src, e); }
+  }
+  if (count === 0) return { success: false, error: 'Could not copy any files.' };
+  return { success: true, count, path: path.join(resolvedDir, path.basename(sourcePaths[0])) };
+}
+
 function safeResolvePath(requestedPath: string): string {
   if (!rootPath) {
     throw new Error('No project folder is open.');
@@ -697,8 +727,10 @@ function setupIPC() {
   ipcMain.handle('fs:pasteFromClipboard', async (_event, targetDir: string) => {
     try {
       const resolvedDir = safeResolvePath(targetDir);
+      const formats = clipboard.availableFormats('clipboard');
+      console.log('[paste] formats:', formats);
 
-      // Check for image in clipboard
+      // 1. Try image
       const nativeImage = clipboard.readImage();
       if (!nativeImage.isEmpty()) {
         const now = new Date();
@@ -708,19 +740,38 @@ function setupIPC() {
         return { success: true, path: outPath };
       }
 
-      // Check for text content
+      // 2. Try FileNameW (Windows file list clipboard)
+      try {
+        if ((formats as string[]).some((f: string) => f.toLowerCase().includes('filename'))) {
+          const raw = clipboard.readBuffer('FileNameW');
+          if (raw && raw.length > 0) {
+            const text = Buffer.from(raw).toString('utf16le').replace(/\0/g, '').trim();
+            const sourcePaths = text.split('\n').filter(Boolean).map((p: string) => p.trim()).filter((p: string) => fs.existsSync(p));
+            if (sourcePaths.length > 0) {
+              return copyFilesToDir(resolvedDir, sourcePaths);
+            }
+          }
+        }
+      } catch (e) { console.log('[paste] FileNameW failed:', e); }
+
+      // 3. Try text with file paths
       const text = clipboard.readText();
       if (text) {
+        // Try to interpret as file paths
+        const lines = text.split(/[\n\r]+/).filter(Boolean);
+        const potentialPaths = lines.map((l: string) => l.trim()).filter((p: string) => fs.existsSync(p));
+        if (potentialPaths.length > 0) {
+          return copyFilesToDir(resolvedDir, potentialPaths);
+        }
+        // Regular text paste
         const newFile = path.join(resolvedDir, 'pasted.txt');
         let finalPath = newFile;
-        if (fs.existsSync(newFile)) {
-          finalPath = path.join(resolvedDir, 'pasted copy.txt');
-        }
+        if (fs.existsSync(newFile)) finalPath = path.join(resolvedDir, 'pasted copy.txt');
         fs.writeFileSync(finalPath, text, 'utf-8');
         return { success: true, path: finalPath };
       }
 
-      return { success: false, error: 'No pasteable content found in clipboard.' };
+      return { success: false, error: `No pasteable content found. Formats: ${formats.join(', ')}` };
     } catch (err: any) {
       return { success: false, error: err.message };
     }
