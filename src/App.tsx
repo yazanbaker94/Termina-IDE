@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { MessageSquarePlus } from 'lucide-react';
+import { MessageSquarePlus, X } from 'lucide-react';
 import Toolbar from './components/Toolbar';
 import SessionRail from './components/SessionRail';
 import Editor from './components/Editor';
@@ -535,6 +535,19 @@ const App: React.FC = () => {
     if (node.type === 'directory') return;
     setActiveDiff(null); setIsLoading(true);
     try {
+      const ext = node.name.split('.').pop()?.toLowerCase() ?? '';
+      const imageExts = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svg']);
+      if (imageExts.has(ext)) {
+        try {
+          const asset = await window.electronAPI.getAssetDataUrl(node.path);
+          setActiveFile({ name: node.name, path: node.path, content: asset.dataUrl, language: 'image' });
+          setSavedContent(asset.dataUrl);
+        } catch {
+          setActiveFile({ name: node.name, path: node.path, content: '[Binary file — preview not available]', language: 'plaintext' });
+          setSavedContent('');
+        }
+        return;
+      }
       const result = await window.electronAPI.readFile(node.path);
       setActiveFile({ name: node.name, path: result.filePath, content: result.content, language: result.language });
       setSavedContent(result.content);
@@ -637,6 +650,7 @@ const App: React.FC = () => {
   const handleSave = useCallback(async () => {
     if (!hasProjectRef.current || !activeFileRef.current) return;
     const file = activeFileRef.current;
+    if (file.language === 'image') return;
     try {
       await window.electronAPI.saveFile(file.path, file.content);
       setSavedContent(file.content);
@@ -660,7 +674,10 @@ const App: React.FC = () => {
 
   useEffect(() => { return () => { cleanAllListeners(); }; }, [cleanAllListeners]);
 
-  const handleRefreshTree = useCallback(() => refreshFileTree(), [refreshFileTree]);
+  const handleRefreshTree = useCallback(async () => {
+    await refreshFileTree();
+    await refreshGitStatus();
+  }, [refreshFileTree, refreshGitStatus]);
   const handleToggleFiles = useCallback(() => setFilesDrawerVisible((v) => !v), []);
 
   const showEditor = !!activeFile || !!activeDiff;
@@ -719,7 +736,8 @@ const App: React.FC = () => {
                   <FilesDrawer visible={true} projectName={hasProject ? (projectName || '') : null}
                     rootTree={rootTree} activeFilePath={activeFile?.path || ''}
                     onClose={() => setFilesDrawerVisible(false)} onFileSelect={handleFileSelect}
-                    onRefreshTree={handleRefreshTree} onOpenFolder={handleOpenFolder} />
+                    onRefreshTree={handleRefreshTree} onOpenFolder={handleOpenFolder}
+                    onCloseActiveFile={handleCloseFile} />
                 </div>
               )}
 
@@ -727,6 +745,19 @@ const App: React.FC = () => {
                 <div className="dock-pane code-dock-pane">
                   {activeDiff ? (
                     <DiffViewer diff={activeDiff} onClose={() => setActiveDiff(null)} onOpenFile={handleOpenFile} />
+                  ) : activeFile?.language === 'image' ? (
+                    <div className="image-preview-pane">
+                      <div className="code-review-tabs" style={{ flexShrink: 0 }}>
+                        <div className="code-review-tab active">
+                          <span className="tab-name">{activeFile.name}</span>
+                        </div>
+                        <div className="code-review-tab-actions">
+                          <button className="agent-action-btn" onClick={handleCloseFile} title="Close"><X size={14} /></button>
+                        </div>
+                      </div>
+                      <img src={activeFile.content} alt={activeFile.name} className="image-preview-img" />
+                      <div className="image-preview-info">{activeFile.name}</div>
+                    </div>
                   ) : (
                     <Editor file={activeFile} isLoading={isLoading} isDirty={isDirty} hasProject={hasProject}
                       onChange={handleEditorChange} onSave={handleSave} onClose={handleCloseFile} />

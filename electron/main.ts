@@ -20,8 +20,7 @@ const IGNORE_DIRS = new Set([
   'node_modules', 'dist', 'dist-electron', 'build', 'release', '.git', '.commandcode',
   'coverage', '__pycache__', '.next', '.nuxt', '.cache', '.vite',
 ]);
-const BINARY_EXTS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.svg',
+const HIDDEN_EXTS = new Set([
   '.woff', '.woff2', '.ttf', '.eot', '.otf',
   '.mp3', '.mp4', '.avi', '.mov', '.mkv', '.webm',
   '.gz', '.zip', '.tar', '.7z', '.rar',
@@ -29,6 +28,20 @@ const BINARY_EXTS = new Set([
   '.pyc', '.class', '.o', '.obj',
   '.db', '.sqlite', '.sqlite3',
 ]);
+
+const BINARY_EXTS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.svg',
+]);
+
+const IMAGE_EXTS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.svg',
+]);
+
+const IMAGE_MIME: Record<string, string> = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon', '.svg': 'image/svg+xml',
+};
 
 interface FileNode {
   name: string;
@@ -39,34 +52,248 @@ interface FileNode {
 
 let fileCount = 0;
 
-function copyFilesToDir(resolvedDir: string, sourcePaths: string[]): { success: boolean; error?: string; path?: string; count?: number } {
-  let count = 0;
+function uniquePath(targetDir: string, preferredName: string): string {
+  const basePath = path.join(targetDir, preferredName);
+  if (!fs.existsSync(basePath)) return basePath;
+  const ext = path.extname(preferredName);
+  const base = path.basename(preferredName, ext);
+  let copyName = `${base} copy${ext}`;
+  let copyIdx = 2;
+  while (fs.existsSync(path.join(targetDir, copyName))) {
+    copyName = `${base} copy ${copyIdx}${ext}`;
+    copyIdx++;
+  }
+  return path.join(targetDir, copyName);
+}
+
+function writeImageBuffer(targetDir: string, buffer: Buffer, ext: string, baseName?: string): { success: boolean; path?: string } {
+  if (!buffer || buffer.length === 0) return { success: false };
+  const fileName = (baseName || 'pasted-image') + ext;
+  const dest = uniquePath(targetDir, fileName);
+  fs.writeFileSync(dest, buffer);
+  return { success: true, path: dest };
+}
+
+function saveNativeImage(targetDir: string): { success: boolean; path?: string } {
+  const img = clipboard.readImage();
+  if (img.isEmpty()) return { success: false };
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+  const filePath = uniquePath(targetDir, `pasted-image-${stamp}.png`);
+  fs.writeFileSync(filePath, img.toPNG());
+  return { success: true, path: filePath };
+}
+
+function parseFileUri(uri: string): string | null {
+  try {
+    let normalized = uri.trim();
+    if (normalized.startsWith('file://')) {
+      normalized = normalized.slice(7);
+    }
+    // Handle Windows file:///C:/ style
+    if (process.platform === 'win32' && normalized.match(/^\/[a-zA-Z]:/)) {
+      normalized = normalized.slice(1);
+    }
+    normalized = decodeURIComponent(normalized);
+    const resolved = path.resolve(normalized);
+    if (fs.existsSync(resolved)) return resolved;
+  } catch {}
+  return null;
+}
+
+function getClipboardFilePaths(formats: string[]): string[] {
+  const paths: string[] = [];
+
+  if (process.platform === 'win32') {
+    // Find the actual FileNameW format name (could be "FileNameW" or "FileName")
+    const fileFormat = formats.find((f: string) => f.includes('FileName'));
+    if (fileFormat) {
+      try {
+        const raw = clipboard.readBuffer(fileFormat);
+        if (raw && raw.length > 0) {
+          const text = Buffer.from(raw).toString('utf16le');
+          const entries = text.split('\0').filter(Boolean);
+          for (const entry of entries) {
+            const trimmed = entry.trim();
+            if (trimmed && fs.existsSync(trimmed)) {
+              paths.push(trimmed);
+            }
+          }
+        }
+      } catch (e) { console.log('[paste] file readBuffer failed:', e); }
+    }
+  }
+
+  if (process.platform === 'darwin') {
+    if (formats.includes('public.file-url')) {
+      try {
+        const text = clipboard.read('public.file-url');
+        if (text) {
+          for (const line of text.toString().split(/[\n\r]+/)) {
+            const resolved = parseFileUri(line.trim());
+            if (resolved) paths.push(resolved);
+          }
+        }
+      } catch (e) { console.log('[paste] public.file-url failed:', e); }
+    }
+    // NSFilenamesPboardType
+    const nsFormat = formats.find((f: string) => f.includes('NSFilenamesPboard') || f.includes('NSFilenames'));
+    if (nsFormat) {
+      try {
+        const raw = clipboard.readBuffer(nsFormat);
+        if (raw) {
+          // Try simple parse: extract <string>...</string> or split by newlines
+          const text = raw.toString('utf8');
+          const stringMatches = text.match(/<string>([^<]+)<\/string>/g);
+          if (stringMatches) {
+            for (const m of stringMatches) {
+              const content = m.replace(/<\/?string>/g, '');
+              const resolved = parseFileUri(content.trim());
+              if (resolved) paths.push(resolved);
+            }
+          } else {
+            // Try plain split
+            for (const line of text.split(/[\n\r\0]+/)) {
+              const resolved = parseFileUri(line.trim());
+              if (resolved) paths.push(resolved);
+            }
+          }
+        }
+      } catch (e) { console.log('[paste] NSFilenames failed:', e); }
+    }
+  }
+
+  if (process.platform === 'linux') {
+    if (formats.includes('text/uri-list')) {
+      try {
+        const text = clipboard.read('text/uri-list');
+        if (text) {
+          for (const line of text.toString().split(/[\n\r]+/)) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+            const resolved = parseFileUri(trimmed);
+            if (resolved) paths.push(resolved);
+          }
+        }
+      } catch (e) { console.log('[paste] text/uri-list failed:', e); }
+    }
+    if (formats.includes('x-special/gnome-copied-files')) {
+      try {
+        const text = clipboard.read('x-special/gnome-copied-files');
+        if (text) {
+          const lines = text.toString().split(/[\n\r]+/).filter(Boolean);
+          for (const line of lines) {
+            if (line.startsWith('copy') || line.startsWith('cut')) continue;
+            const resolved = parseFileUri(line.trim());
+            if (resolved) paths.push(resolved);
+          }
+        }
+      } catch (e) { console.log('[paste] gnome-copied-files failed:', e); }
+    }
+  }
+
+  return paths;
+}
+
+function getClipboardImageBuffer(formats: string[]): { buffer: Buffer; ext: string } | null {
+  const candidates = [
+    { fmt: 'image/png', ext: '.png' },
+    { fmt: 'image/jpeg', ext: '.jpg' },
+    { fmt: 'image/webp', ext: '.webp' },
+    { fmt: 'image/gif', ext: '.gif' },
+    { fmt: 'image/jpg', ext: '.jpg' },
+    { fmt: 'public.png', ext: '.png' },
+    { fmt: 'public.jpeg', ext: '.jpg' },
+    { fmt: 'PNG', ext: '.png' },
+  ];
+
+  for (const { fmt, ext } of candidates) {
+    if (formats.includes(fmt)) {
+      try {
+        const buffer = clipboard.readBuffer(fmt);
+        if (buffer && buffer.length > 0) {
+          return { buffer, ext };
+        }
+      } catch (e) { console.log(`[paste] readBuffer(${fmt}) failed:`, e); }
+    }
+  }
+  return null;
+}
+
+function getImageFromHtmlOrText(): { buffer?: Buffer; ext?: string; error?: string } {
+  try {
+    const html = clipboard.readHTML();
+    const text = clipboard.readText();
+
+    const contentToSearch = `${html || ''}\n${text || ''}`;
+
+    // Match data:image/{type};base64,{data}
+    const dataUriMatch = contentToSearch.match(/data:image\/(png|jpeg|jpg|gif|webp);base64,([A-Za-z0-9+/=]+)/);
+    if (dataUriMatch) {
+      const type = dataUriMatch[1];
+      const base64Data = dataUriMatch[2];
+      const ext = type === 'jpeg' ? '.jpg' : `.${type}`;
+      const buffer = Buffer.from(base64Data, 'base64');
+      if (buffer.length > 0) return { buffer, ext };
+    }
+
+    // Check for remote image URLs (http://...)
+    if (contentToSearch.match(/<img[^>]+src=["']https?:\/\//i)) {
+      return { error: 'Clipboard contains a remote image URL, but remote image download is not supported yet.' };
+    }
+
+    // Check for file:// image src
+    const fileSrcMatch = contentToSearch.match(/<img[^>]+src=["'](file:\/\/[^"']+)["']/i);
+    if (fileSrcMatch) {
+      const resolved = parseFileUri(fileSrcMatch[1]);
+      if (resolved) {
+        try {
+          const buffer = fs.readFileSync(resolved);
+          const ext = path.extname(resolved).toLowerCase();
+          if (buffer.length > 0) return { buffer, ext };
+        } catch {}
+      }
+    }
+  } catch (e) { console.log('[paste] HTML/text parse failed:', e); }
+
+  return {};
+}
+
+function logClipboardDebug(formats: string[]) {
+  console.log('[paste] platform:', process.platform);
+  console.log('[paste] formats:', formats);
+  try {
+    const text = clipboard.readText();
+    const html = clipboard.readHTML();
+    console.log('[paste] readText length:', text?.length ?? 0);
+    console.log('[paste] readHTML length:', html?.length ?? 0);
+    console.log('[paste] readImage isEmpty:', clipboard.readImage().isEmpty());
+  } catch {}
+  for (const fmt of formats) {
+    try {
+      const buf = clipboard.readBuffer(fmt);
+      console.log(`[paste] buffer[${fmt}] length:`, buf?.length ?? 0);
+    } catch {}
+  }
+}
+
+function copyFilesToDir(resolvedDir: string, sourcePaths: string[]): { success: boolean; error?: string; path?: string; paths?: string[]; count?: number } {
+  const copiedPaths: string[] = [];
   for (const src of sourcePaths) {
     try {
       const srcName = path.basename(src);
-      let dest = path.join(resolvedDir, srcName);
-      if (fs.existsSync(dest)) {
-        const ext = path.extname(srcName);
-        const base = path.basename(srcName, ext);
-        let copyName = `${base} copy${ext}`;
-        let copyIdx = 2;
-        while (fs.existsSync(path.join(resolvedDir, copyName))) {
-          copyName = `${base} copy ${copyIdx}${ext}`;
-          copyIdx++;
-        }
-        dest = path.join(resolvedDir, copyName);
-      }
+      const dest = uniquePath(resolvedDir, srcName);
       const stat = fs.statSync(src);
       if (stat.isDirectory()) {
         fs.cpSync(src, dest, { recursive: true, errorOnExist: false });
       } else {
         fs.copyFileSync(src, dest);
       }
-      count++;
+      copiedPaths.push(dest);
     } catch (e) { console.log('[copy] failed:', src, e); }
   }
-  if (count === 0) return { success: false, error: 'Could not copy any files.' };
-  return { success: true, count, path: path.join(resolvedDir, path.basename(sourcePaths[0])) };
+  if (copiedPaths.length === 0) return { success: false, error: 'Could not copy any files.' };
+  return { success: true, count: copiedPaths.length, paths: copiedPaths, path: copiedPaths[0] };
 }
 
 function safeResolvePath(requestedPath: string): string {
@@ -120,7 +347,7 @@ function buildFileTree(dirPath: string, depth: number = 0): FileNode | null {
       }
     } else if (entry.isFile()) {
       const ext = path.extname(entry.name).toLowerCase();
-      if (BINARY_EXTS.has(ext)) continue;
+      if (HIDDEN_EXTS.has(ext)) continue;
       fileCount++;
       children.push({
         name: entry.name,
@@ -199,13 +426,15 @@ function startFileWatcher() {
   });
 
   const emit = (eventType: string, filePath: string) => {
-    const changeType = eventType === 'add' ? 'added' : eventType === 'change' ? 'changed' : 'deleted';
-    sendToRenderer('fs:onFileChanged', { path: filePath, changeType });
+    const changeType = eventType === 'add' || eventType === 'addDir' ? 'added' : eventType === 'change' ? 'changed' : 'deleted';
+    sendToRenderer('fs:onFileChanged', { path: filePath, changeType, isDirectory: eventType === 'addDir' || eventType === 'unlinkDir' });
   };
 
   fileWatcher.on('add', (p) => emit('add', p));
+  fileWatcher.on('addDir', (p) => emit('addDir', p));
   fileWatcher.on('change', (p) => emit('change', p));
   fileWatcher.on('unlink', (p) => emit('unlink', p));
+  fileWatcher.on('unlinkDir', (p) => emit('unlinkDir', p));
 }
 
 function stopFileWatcher() {
@@ -728,50 +957,49 @@ function setupIPC() {
     try {
       const resolvedDir = safeResolvePath(targetDir);
       const formats = clipboard.availableFormats('clipboard');
-      console.log('[paste] formats:', formats);
+      logClipboardDebug(formats);
 
-      // 1. Try image
-      const nativeImage = clipboard.readImage();
-      if (!nativeImage.isEmpty()) {
-        const now = new Date();
-        const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}-${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
-        const outPath = path.join(resolvedDir, `pasted-image-${stamp}.png`);
-        fs.writeFileSync(outPath, nativeImage.toPNG());
-        return { success: true, path: outPath };
+      // 1. Try copied file paths (explorer/finder file copy)
+      const filePaths = getClipboardFilePaths(formats);
+      if (filePaths.length > 0) {
+        console.log('[paste] found file paths:', filePaths);
+        return copyFilesToDir(resolvedDir, filePaths);
       }
 
-      // 2. Try FileNameW (Windows file list clipboard)
-      try {
-        if ((formats as string[]).some((f: string) => f.toLowerCase().includes('filename'))) {
-          const raw = clipboard.readBuffer('FileNameW');
-          if (raw && raw.length > 0) {
-            const text = Buffer.from(raw).toString('utf16le').replace(/\0/g, '').trim();
-            const sourcePaths = text.split('\n').filter(Boolean).map((p: string) => p.trim()).filter((p: string) => fs.existsSync(p));
-            if (sourcePaths.length > 0) {
-              return copyFilesToDir(resolvedDir, sourcePaths);
-            }
-          }
-        }
-      } catch (e) { console.log('[paste] FileNameW failed:', e); }
+      // 2. Try native bitmap image (screenshot / browser copy image)
+      const nativeResult = saveNativeImage(resolvedDir);
+      if (nativeResult.success) return nativeResult;
 
-      // 3. Try text with file paths
+      // 3. Try raw image buffers (e.g. Ctrl+C image in some apps)
+      const imageBuffer = getClipboardImageBuffer(formats);
+      if (imageBuffer) {
+        console.log('[paste] found image buffer, ext:', imageBuffer.ext);
+        return writeImageBuffer(resolvedDir, imageBuffer.buffer, imageBuffer.ext);
+      }
+
+      // 4. Try data: URI from HTML or text
+      const htmlResult = getImageFromHtmlOrText();
+      if (htmlResult.buffer) {
+        console.log('[paste] found data URI image');
+        return writeImageBuffer(resolvedDir, htmlResult.buffer, htmlResult.ext ?? '.png');
+      }
+      if (htmlResult.error) return { success: false, error: htmlResult.error, formats };
+
+      // 5. Try plain text fallback
       const text = clipboard.readText();
       if (text) {
-        // Try to interpret as file paths
+        // Try interpreting as file paths
         const lines = text.split(/[\n\r]+/).filter(Boolean);
         const potentialPaths = lines.map((l: string) => l.trim()).filter((p: string) => fs.existsSync(p));
         if (potentialPaths.length > 0) {
           return copyFilesToDir(resolvedDir, potentialPaths);
         }
-        // Regular text paste
-        const newFile = path.join(resolvedDir, 'pasted.txt');
-        let finalPath = newFile;
-        if (fs.existsSync(newFile)) finalPath = path.join(resolvedDir, 'pasted copy.txt');
-        fs.writeFileSync(finalPath, text, 'utf-8');
-        return { success: true, path: finalPath };
+        const filePath = uniquePath(resolvedDir, 'pasted.txt');
+        fs.writeFileSync(filePath, text, 'utf-8');
+        return { success: true, path: filePath };
       }
 
-      return { success: false, error: `No pasteable content found. Formats: ${formats.join(', ')}` };
+      return { success: false, error: `No pasteable content found. Clipboard formats: ${formats.join(', ')}`, formats };
     } catch (err: any) {
       return { success: false, error: err.message };
     }
@@ -808,6 +1036,42 @@ function setupIPC() {
       return { success: true, count };
     } catch (err: any) {
       return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('fs:getAssetDataUrl', async (_event, filePath: string) => {
+    try {
+      const resolved = safeResolvePath(filePath);
+      const ext = path.extname(resolved).toLowerCase();
+      const mime = IMAGE_MIME[ext];
+      if (!mime) throw new Error('Not a supported image format.');
+      const buffer = fs.readFileSync(resolved);
+      const base64 = buffer.toString('base64');
+      return { dataUrl: `data:${mime};base64,${base64}`, mime };
+    } catch (err: any) {
+      throw new Error(`Cannot read image: ${err.message}`);
+    }
+  });
+
+  ipcMain.handle('fs:getClipboardDebug', async () => {
+    try {
+      const formats = clipboard.availableFormats('clipboard');
+      const text = clipboard.readText();
+      const image = clipboard.readImage();
+      const bufLengths: Record<string, number> = {};
+      for (const fmt of formats) {
+        try { bufLengths[fmt] = clipboard.readBuffer(fmt)?.length ?? 0; } catch { bufLengths[fmt] = -1; }
+      }
+      return {
+        platform: process.platform,
+        formats,
+        textLength: text?.length ?? 0,
+        htmlLength: clipboard.readHTML()?.length ?? 0,
+        imageIsEmpty: image.isEmpty(),
+        bufferLengths: bufLengths,
+      };
+    } catch {
+      return { platform: process.platform, formats: [], textLength: 0, htmlLength: 0, imageIsEmpty: true, bufferLengths: {} };
     }
   });
 }

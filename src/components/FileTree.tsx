@@ -2,11 +2,13 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { ChevronRight, File, Folder, FolderOpen, FilePlus, FolderPlus, Trash2, PenLine, ExternalLink, ClipboardPaste, Copy } from 'lucide-react';
 import { FileNode } from '../types';
 
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svg']);
+
 interface FileTreeProps {
   tree: FileNode | null;
   activeFilePath: string;
   onFileSelect: (node: FileNode) => void;
-  onRefreshTree: () => void;
+  onRefreshTree: () => Promise<void> | void;
   onCloseActiveFile?: () => void;
 }
 
@@ -254,8 +256,17 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
           const dir = targetDir || data.path;
           if (!dir) return;
           const r = await window.electronAPI.pasteFromClipboard(dir);
-          if (!r.success) alert(r.error);
-          onRefreshTree();
+          if (!r.success) {
+            const msg = r.error ?? 'Paste failed.';
+            const formats = r.formats?.length ? `\nClipboard formats: ${r.formats.join(', ')}` : '';
+            alert(msg + formats);
+            return;
+          }
+          await onRefreshTree();
+          if (r.path) {
+            const ext = r.path.split('.').pop()?.toLowerCase() ?? '';
+            onFileSelect({ name: r.path.split(/[\\/]/).pop() ?? 'pasted', path: r.path, type: IMAGE_EXTS.has(ext) || !ext ? 'file' : 'file' });
+          }
           break;
         }
         case 'delete': {
@@ -269,7 +280,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
           }
           const r = await window.electronAPI.deletePath(data.path);
           if (!r.success) alert(r.error);
-          onRefreshTree();
+          await onRefreshTree();
           break;
         }
         case 'copyRelativePath': {
@@ -286,7 +297,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
       console.error('[file-action] error:', action, err);
       alert(`Operation failed: ${err}`);
     }
-  }, [rootPath, onRefreshTree, activeFilePath, onCloseActiveFile]);
+  }, [rootPath, onRefreshTree, activeFilePath, onCloseActiveFile, onFileSelect]);
 
   const confirmRename = useCallback(async (value: string) => {
     if (!editing?.path || !editing?.originalName) return;
@@ -294,7 +305,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
     const r = await window.electronAPI.renamePath(editing.path, value);
     if (!r.success) throw new Error(r.error);
     setEditing(null);
-    onRefreshTree();
+    await onRefreshTree();
   }, [editing, onRefreshTree]);
 
   const confirmCreate = useCallback(async (value: string) => {
@@ -303,13 +314,13 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
       const r = await window.electronAPI.createFile(editing.parentDir, value);
       if (!r.success) throw new Error(r.error);
       setEditing(null);
-      onRefreshTree();
+      await onRefreshTree();
       if (r.path) onFileSelect({ name: value, path: r.path, type: 'file' });
     } else if (editing.type === 'createFolder') {
       const r = await window.electronAPI.createFolder(editing.parentDir, value);
       if (!r.success) throw new Error(r.error);
       setEditing(null);
-      onRefreshTree();
+      await onRefreshTree();
     }
   }, [editing, onRefreshTree, onFileSelect]);
 
@@ -340,7 +351,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
     if (!target) return;
     const r = await window.electronAPI.copyExternalFiles(target, sourcePaths);
     if (!r.success) alert(r.error);
-    else onRefreshTree();
+    else { await onRefreshTree(); }
   }, [rootPath, onRefreshTree]);
 
   if (!tree || !tree.children) {

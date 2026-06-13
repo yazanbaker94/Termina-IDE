@@ -136,6 +136,8 @@ export interface ElectronAPI {
   renamePath: (oldPath: string, newName: string) => Promise<{ success: boolean; error?: string; path?: string }>;
   deletePath: (targetPath: string) => Promise<{ success: boolean; error?: string }>;
   revealInExplorer: (targetPath: string) => Promise<{ success: boolean; error?: string }>;
-  pasteFromClipboard: (targetDir: string) => Promise<{ success: boolean; error?: string; path?: string }>;
+  pasteFromClipboard: (targetDir: string) => Promise<{ success: boolean; error?: string; path?: string; paths?: string[]; count?: number; formats?: string[] }>;
   copyExternalFiles: (targetDir: string, sourcePaths: string[]) => Promise<{ success: boolean; error?: string; count?: number }>;
+  getAssetDataUrl: (filePath: string) => Promise<{ dataUrl: string; mime: string }>;
+  getClipboardDebug: () => Promise<{ platform: string; formats: string[]; textLength: number; htmlLength: number; imageIsEmpty: boolean; bufferLengths: Record<string, number> }>;
 }

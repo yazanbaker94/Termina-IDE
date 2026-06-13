@@ -8,7 +8,7 @@ interface SidebarProps {
   rootTree: FileNode | null;
   activeFilePath: string;
   onFileSelect: (node: FileNode) => void;
-  onRefreshTree: () => void;
+  onRefreshTree: () => Promise<void> | void;
   onOpenFolder: () => void;
   onCloseActiveFile?: () => void;
 }
@@ -27,7 +27,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       <div className="sidebar-header">
         <span className="sidebar-title">EXPLORER</span>
         {!!projectName && (
-          <button className="sidebar-refresh-btn" onClick={onRefreshTree} title="Refresh explorer">
+          <button className="sidebar-refresh-btn" onClick={() => { onRefreshTree(); }} title="Refresh explorer">
             <RefreshCw size={12} />
           </button>
         )}
@@ -48,7 +48,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             tree={rootTree}
             activeFilePath={activeFilePath}
             onFileSelect={onFileSelect}
-            onRefreshTree={onRefreshTree}
+            onRefreshTree={async () => { await onRefreshTree(); }}
             onCloseActiveFile={onCloseActiveFile}
           />
         </div>

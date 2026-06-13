@@ -10,7 +10,7 @@ interface FilesDrawerProps {
   activeFilePath: string;
   onClose: () => void;
   onFileSelect: (node: FileNode) => void;
-  onRefreshTree: () => void;
+  onRefreshTree: () => Promise<void> | void;
   onOpenFolder: () => void;
   onCloseActiveFile?: () => void;
 }

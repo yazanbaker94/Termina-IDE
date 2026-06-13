@@ -47,4 +47,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   revealInExplorer: (targetPath: string) => ipcRenderer.invoke('fs:revealInExplorer', targetPath),
   pasteFromClipboard: (targetDir: string) => ipcRenderer.invoke('fs:pasteFromClipboard', targetDir),
   copyExternalFiles: (targetDir: string, sourcePaths: string[]) => ipcRenderer.invoke('fs:copyExternalFiles', targetDir, sourcePaths),
+  getAssetDataUrl: (filePath: string) => ipcRenderer.invoke('fs:getAssetDataUrl', filePath),
+  getClipboardDebug: () => ipcRenderer.invoke('fs:getClipboardDebug'),
 });
