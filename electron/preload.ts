@@ -39,4 +39,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   unstageFile: (filePath: string) => ipcRenderer.invoke('git:unstageFile', filePath),
   commitGit: (message: string) => ipcRenderer.invoke('git:commit', message),
   openProjectPath: (folderPath: string) => ipcRenderer.invoke('project:openPath', folderPath),
+  minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
+  maximizeToggleWindow: () => ipcRenderer.invoke('window:maximizeToggle'),
+  closeWindow: () => ipcRenderer.invoke('window:close'),
 });

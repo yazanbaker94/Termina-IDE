@@ -621,6 +621,23 @@ function setupIPC() {
       return { success: false, error: err.message || 'Failed to open project.' };
     }
   });
+
+  ipcMain.handle('window:minimize', async () => {
+    mainWindow?.minimize();
+  });
+
+  ipcMain.handle('window:maximizeToggle', async () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  });
+
+  ipcMain.handle('window:close', async () => {
+    mainWindow?.close();
+  });
 }
 
 function createWindow() {

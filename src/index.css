@@ -742,6 +742,42 @@ body {
   justify-content: center;
 }
 
+/* ===== Window Controls ===== */
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.window-control-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 28px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.window-control-btn:hover {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.window-close-btn:hover {
+  background: #e81123;
+  color: #fff;
+}
+
 /* ===== File Tree (shared by Sidebar and FilesDrawer) ===== */
 
 .file-list {

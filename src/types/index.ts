@@ -130,4 +130,7 @@ export interface ElectronAPI {
   unstageFile: (filePath: string) => Promise<{ success: boolean }>;
   commitGit: (message: string) => Promise<GitCommitResult>;
   openProjectPath: (folderPath: string) => Promise<OpenProjectPathResult>;
+  minimizeWindow: () => Promise<void>;
+  maximizeToggleWindow: () => Promise<void>;
+  closeWindow: () => Promise<void>;
 }
