@@ -1,4 +1,4 @@
-import React, { useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useEffect } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import { FileCode, FileCode2, File, Paintbrush, X } from 'lucide-react';
@@ -49,6 +49,19 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
       },
     });
   }, []);
+
+  // Live reload: sync Monaco model when file content changes from outside
+  useEffect(() => {
+    const ed = editorRef.current;
+    if (!ed || !file) return;
+    const model = ed.getModel();
+    if (!model) return;
+    if (model.getValue() !== file.content) {
+      const viewState = ed.saveViewState();
+      model.setValue(file.content);
+      if (viewState) ed.restoreViewState(viewState);
+    }
+  }, [file]);
 
   if (!file || !file.path) {
     return (

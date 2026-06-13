@@ -12,6 +12,7 @@ interface AgentPanelProps {
   changedFiles: FileChangeEvent[];
   terminalBuffer: string;
   restartCount: number;
+  resizeSignal: number;
   hasProject: boolean;
   sessionLabel: string | null;
   onRenameSession: (sessionId: string, newLabel: string) => void;
@@ -53,6 +54,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   changedFiles,
   terminalBuffer,
   restartCount,
+  resizeSignal,
   hasProject,
   sessionLabel,
   onRenameSession,
@@ -183,6 +185,12 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
       focusTerminal();
     }
   }, [isOwnAgentRunning, focusTerminal]);
+
+  useEffect(() => {
+    requestAnimationFrame(() => syncResize());
+    const t = setTimeout(() => syncResize(), 100);
+    return () => clearTimeout(t);
+  }, [resizeSignal, syncResize]);
 
   useEffect(() => {
     const handleResize = () => syncResize();

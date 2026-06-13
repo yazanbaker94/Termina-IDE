@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { MessageSquarePlus } from 'lucide-react';
 import Toolbar from './components/Toolbar';
 import SessionRail from './components/SessionRail';
@@ -47,7 +47,6 @@ const App: React.FC = () => {
   const [filesDrawerVisible, setFilesDrawerVisible] = useState(false);
 
   const [sessionRuntime, setSessionRuntime] = useState<Record<string, SessionRuntimeState>>({});
-  const [dockChangeCount, setDockChangeCount] = useState(0);
 
   const activeRuntime = activeSessionId ? sessionRuntime[activeSessionId] : null;
 
@@ -666,6 +665,7 @@ const App: React.FC = () => {
 
   const showEditor = !!activeFile || !!activeDiff;
   const rightDockOpen = filesDrawerVisible || showEditor;
+  const dockChangeCount = (filesDrawerVisible ? 1 : 0) + (showEditor ? 1 : 0) + (activeFile?.path?.length ?? 0) + (activeDiff?.filePath?.length ?? 0);
 
   return (
     <div className="app-container">
@@ -696,6 +696,7 @@ const App: React.FC = () => {
                 status={activeRuntime?.agentStatus ?? 'idle'} exitCode={activeRuntime?.exitCode ?? null}
                 error={activeRuntime?.error ?? ''} changedFiles={activeRuntime?.changedFiles ?? []}
                 terminalBuffer={activeRuntime?.terminalBuffer ?? ''} restartCount={activeRuntime?.restartCount ?? 0}
+                resizeSignal={dockChangeCount}
                 hasProject={hasProject} sessionLabel={activeSession?.label ?? null}
                 onRenameSession={handleRenameSession}
                 onWrite={(input) => handleWriteAgent(activeSessionId, input)}
