@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, shell, dialog, ipcMain, clipboard } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import * as pty from 'node-pty';
@@ -637,6 +637,99 @@ function setupIPC() {
 
   ipcMain.handle('window:close', async () => {
     mainWindow?.close();
+  });
+
+  ipcMain.handle('fs:createFile', async (_event, parentDir: string, name: string) => {
+    try {
+      const resolved = safeResolvePath(path.join(parentDir, name));
+      if (fs.existsSync(resolved)) return { success: false, error: 'File already exists.' };
+      fs.writeFileSync(resolved, '', 'utf-8');
+      return { success: true, path: resolved };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('fs:createFolder', async (_event, parentDir: string, name: string) => {
+    try {
+      const resolved = safeResolvePath(path.join(parentDir, name));
+      if (fs.existsSync(resolved)) return { success: false, error: 'Folder already exists.' };
+      fs.mkdirSync(resolved, { recursive: true });
+      return { success: true, path: resolved };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('fs:renamePath', async (_event, oldPath: string, newName: string) => {
+    try {
+      const resolved = safeResolvePath(oldPath);
+      const parent = path.dirname(resolved);
+      const newPath = path.join(parent, newName);
+      const safeNewPath = safeResolvePath(newPath);
+      if (fs.existsSync(safeNewPath)) return { success: false, error: 'A file or folder with that name already exists.' };
+      fs.renameSync(resolved, safeNewPath);
+      return { success: true, path: safeNewPath };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('fs:deletePath', async (_event, targetPath: string) => {
+    try {
+      const resolved = safeResolvePath(targetPath);
+      const stat = fs.statSync(resolved);
+      if (stat.isDirectory()) {
+        fs.rmSync(resolved, { recursive: true, force: true, maxRetries: 3 });
+      } else {
+        fs.unlinkSync(resolved);
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('fs:revealInExplorer', async (_event, targetPath: string) => {
+    try {
+      const resolved = safeResolvePath(targetPath);
+      shell.showItemInFolder(resolved);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('fs:pasteFromClipboard', async (_event, targetDir: string) => {
+    try {
+      const resolvedDir = safeResolvePath(targetDir);
+
+      // Check for image in clipboard
+      const nativeImage = clipboard.readImage();
+      if (!nativeImage.isEmpty()) {
+        const now = new Date();
+        const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}-${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
+        const outPath = path.join(resolvedDir, `pasted-image-${stamp}.png`);
+        fs.writeFileSync(outPath, nativeImage.toPNG());
+        return { success: true, path: outPath };
+      }
+
+      // Check for text content
+      const text = clipboard.readText();
+      if (text) {
+        const newFile = path.join(resolvedDir, 'pasted.txt');
+        let finalPath = newFile;
+        if (fs.existsSync(newFile)) {
+          finalPath = path.join(resolvedDir, 'pasted copy.txt');
+        }
+        fs.writeFileSync(finalPath, text, 'utf-8');
+        return { success: true, path: finalPath };
+      }
+
+      return { success: false, error: 'No pasteable content found in clipboard.' };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
   });
 }
 

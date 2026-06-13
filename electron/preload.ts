@@ -42,4 +42,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   maximizeToggleWindow: () => ipcRenderer.invoke('window:maximizeToggle'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
+  createFile: (parentDir: string, name: string) => ipcRenderer.invoke('fs:createFile', parentDir, name),
+  createFolder: (parentDir: string, name: string) => ipcRenderer.invoke('fs:createFolder', parentDir, name),
+  renamePath: (oldPath: string, newName: string) => ipcRenderer.invoke('fs:renamePath', oldPath, newName),
+  deletePath: (targetPath: string) => ipcRenderer.invoke('fs:deletePath', targetPath),
+  revealInExplorer: (targetPath: string) => ipcRenderer.invoke('fs:revealInExplorer', targetPath),
+  pasteFromClipboard: (targetDir: string) => ipcRenderer.invoke('fs:pasteFromClipboard', targetDir),
 });

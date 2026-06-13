@@ -46,6 +46,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             tree={rootTree}
             activeFilePath={activeFilePath}
             onFileSelect={onFileSelect}
+            onRefreshTree={onRefreshTree}
           />
         </div>
       )}

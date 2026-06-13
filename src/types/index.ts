@@ -133,4 +133,10 @@ export interface ElectronAPI {
   minimizeWindow: () => Promise<void>;
   maximizeToggleWindow: () => Promise<void>;
   closeWindow: () => Promise<void>;
+  createFile: (parentDir: string, name: string) => Promise<{ success: boolean; error?: string; path?: string }>;
+  createFolder: (parentDir: string, name: string) => Promise<{ success: boolean; error?: string; path?: string }>;
+  renamePath: (oldPath: string, newName: string) => Promise<{ success: boolean; error?: string; path?: string }>;
+  deletePath: (targetPath: string) => Promise<{ success: boolean; error?: string }>;
+  revealInExplorer: (targetPath: string) => Promise<{ success: boolean; error?: string }>;
+  pasteFromClipboard: (targetDir: string) => Promise<{ success: boolean; error?: string; path?: string }>;
 }

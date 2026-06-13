@@ -847,6 +847,57 @@ body {
   white-space: nowrap;
 }
 
+/* ===== File Context Menu ===== */
+
+.file-context-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+
+.file-context-menu {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  min-width: 160px;
+  animation: context-menu-in 0.1s ease;
+}
+
+@keyframes context-menu-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.file-context-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s ease;
+}
+
+.file-context-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.file-context-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 3px 6px;
+}
+
 /* ===== Editor (shared) ===== */
 
 .tab-icon {

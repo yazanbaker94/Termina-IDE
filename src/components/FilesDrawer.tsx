@@ -96,6 +96,7 @@ const FilesDrawer: React.FC<FilesDrawerProps> = ({
             tree={filteredTree}
             activeFilePath={activeFilePath}
             onFileSelect={onFileSelect}
+            onRefreshTree={onRefreshTree}
           />
         </div>
       )}
