@@ -47,7 +47,7 @@ const App: React.FC = () => {
   const [filesDrawerVisible, setFilesDrawerVisible] = useState(false);
 
   const [sessionRuntime, setSessionRuntime] = useState<Record<string, SessionRuntimeState>>({});
-  const [rejectingAll, setRejectingAll] = useState(false);
+  const [dockChangeCount, setDockChangeCount] = useState(0);
 
   const activeRuntime = activeSessionId ? sessionRuntime[activeSessionId] : null;
 

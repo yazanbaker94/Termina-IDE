@@ -60,14 +60,13 @@ body {
   display: flex;
   flex: 1;
   min-width: 0;
-  position: relative;
   overflow: hidden;
 }
 
-/* Agent region fills main workspace, never resized by dock */
+/* Agent region fills remaining workspace, shrinks when dock opens */
 .agent-region {
-  position: absolute;
-  inset: 0;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -78,21 +77,12 @@ body {
   min-width: 0;
 }
 
-/* Right dock — overlays agent on right side */
+/* Right dock — flex child that pushes terminal */
 .right-dock {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
   display: flex;
   align-items: stretch;
-  z-index: 10;
-  animation: right-dock-slide-in 0.2s ease;
-}
-
-@keyframes right-dock-slide-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .dock-pane {
