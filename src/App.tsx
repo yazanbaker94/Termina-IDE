@@ -180,10 +180,10 @@ const App: React.FC = () => {
           const current = next[id] ?? defaultRuntime();
           next[id] = { ...current, agentStatus: 'running', exitCode: null, error: '' };
         }
-        // Mark sessions that think they're running/starting but PTY is gone as idle
+        // Mark sessions that think they're running/starting but PTY is gone as exited
         for (const [sid, rt] of Object.entries(next)) {
           if (!runningIds.has(sid) && (rt.agentStatus === 'running' || rt.agentStatus === 'starting')) {
-            next[sid] = { ...rt, agentStatus: 'idle' };
+            next[sid] = { ...rt, agentStatus: 'exited' };
           }
         }
         return next;
@@ -615,8 +615,8 @@ const App: React.FC = () => {
     try {
       const result = await window.electronAPI.writeAgent(sessionId, input);
       if (!result.success) {
-        updateSessionRuntime(sessionId, { agentStatus: 'idle' });
-        reconcileAgentStatus();
+        updateSessionRuntime(sessionId, { agentStatus: 'exited', error: 'Agent process is no longer running.' });
+        await reconcileAgentStatus();
       }
     } catch (err) {
       console.error('Failed to write to agent:', err);

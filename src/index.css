@@ -1354,6 +1354,18 @@ body {
   line-height: 1.4;
 }
 
+.agent-ended-banner {
+  padding: 6px 12px;
+  margin: 4px 8px 0;
+  background: rgba(243, 139, 168, 0.08);
+  border: 1px solid rgba(243, 139, 168, 0.18);
+  border-radius: 4px;
+  font-size: 11px;
+  color: #f38ba8;
+  text-align: center;
+  flex-shrink: 0;
+}
+
 /* ===== Bottom Bar ===== */
 
 .bottombar {

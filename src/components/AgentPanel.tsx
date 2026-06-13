@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { AlertTriangle, FilePlus, FileEdit, FileMinus, ChevronDown, ChevronRight, Check, X } from 'lucide-react';
+import { AlertTriangle, FilePlus, FileEdit, FileMinus, ChevronDown, ChevronRight, X } from 'lucide-react';
 import { FileChangeEvent, AgentStatus } from '../types';
 
 interface AgentPanelProps {
@@ -208,6 +208,12 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
           </span>
         </div>
       </div>
+
+      {(status === 'exited' || status === 'error') && (
+        <div className="agent-ended-banner">
+          <span>Agent process ended. Start a new chat.</span>
+        </div>
+      )}
 
       {error && (
         <div className="agent-error-banner">
