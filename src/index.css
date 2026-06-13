@@ -898,6 +898,87 @@ body {
   margin: 3px 6px;
 }
 
+/* ===== Prompt Modal ===== */
+
+.prompt-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.prompt-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 320px;
+  max-width: 420px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.prompt-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+.prompt-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  outline: none;
+}
+
+.prompt-input:focus {
+  border-color: var(--accent);
+}
+
+.prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.prompt-btn {
+  height: 28px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.prompt-cancel {
+  background: transparent;
+  color: var(--text-muted);
+}
+.prompt-cancel:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.prompt-confirm {
+  background: var(--accent);
+  color: var(--bg-tertiary);
+}
+.prompt-confirm:hover {
+  opacity: 0.85;
+}
+
 /* ===== Editor (shared) ===== */
 
 .tab-icon {

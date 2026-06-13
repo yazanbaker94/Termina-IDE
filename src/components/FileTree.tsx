@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { ChevronRight, File, Folder, FolderOpen, FilePlus, FolderPlus, Trash2, PenLine, ExternalLink, ClipboardPaste } from 'lucide-react';
 import { FileNode } from '../types';
+import PromptModal from './PromptModal';
 
 interface FileTreeProps {
   tree: FileNode | null;
@@ -28,20 +29,20 @@ const ContextMenu: React.FC<{ data: ContextMenuData; onClose: () => void; onActi
         onClick={(e) => e.stopPropagation()}>
         {data.kind === 'root' || data.kind === 'folder' ? (
           <>
-            <button className="file-context-item" onClick={() => doAction('newFile')}><FilePlus size={11} /><span>New File</span></button>
-            <button className="file-context-item" onClick={() => doAction('newFolder')}><FolderPlus size={11} /><span>New Folder</span></button>
-            <button className="file-context-item" onClick={() => doAction('paste')}><ClipboardPaste size={11} /><span>Paste</span></button>
+            <button className="file-context-item" onClick={() => doAction('newFile')} onContextMenu={(e) => e.preventDefault()}><FilePlus size={11} /><span>New File</span></button>
+            <button className="file-context-item" onClick={() => doAction('newFolder')} onContextMenu={(e) => e.preventDefault()}><FolderPlus size={11} /><span>New Folder</span></button>
+            <button className="file-context-item" onClick={() => doAction('paste')} onContextMenu={(e) => e.preventDefault()}><ClipboardPaste size={11} /><span>Paste</span></button>
             <div className="file-context-separator" />
           </>
         ) : null}
         {data.kind === 'folder' || data.kind === 'file' ? (
-          <button className="file-context-item" onClick={() => doAction('rename')}><PenLine size={11} /><span>Rename</span></button>
+          <button className="file-context-item" onClick={() => doAction('rename')} onContextMenu={(e) => e.preventDefault()}><PenLine size={11} /><span>Rename</span></button>
         ) : null}
         {data.kind === 'file' ? (
-          <button className="file-context-item" onClick={() => doAction('delete')}><Trash2 size={11} /><span>Delete</span></button>
+          <button className="file-context-item" onClick={() => doAction('delete')} onContextMenu={(e) => e.preventDefault()}><Trash2 size={11} /><span>Delete</span></button>
         ) : null}
         <div className="file-context-separator" />
-        <button className="file-context-item" onClick={() => doAction('reveal')}><ExternalLink size={11} /><span>Reveal in Explorer</span></button>
+        <button className="file-context-item" onClick={() => doAction('reveal')} onContextMenu={(e) => e.preventDefault()}><ExternalLink size={11} /><span>Reveal in Explorer</span></button>
       </div>
       <div className="file-context-backdrop" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
     </>
@@ -132,6 +133,18 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
   const closeMenu = useCallback(() => setMenu(null), []);
   const rootPath = tree?.path ?? '';
 
+  // Prompt modal state
+  const [promptState, setPromptState] = useState<{
+    title: string; defaultValue: string; placeholder: string;
+    resolve: (value: string) => void;
+  } | null>(null);
+
+  const showPrompt = useCallback((title: string, defaultValue = '', placeholder = ''): Promise<string> => {
+    return new Promise((resolve) => {
+      setPromptState({ title, defaultValue, placeholder, resolve });
+    });
+  }, []);
+
   const openMenu = useCallback((kind: ContextMenuData['kind'], nodeOrPath: FileNode | string, x: number, y: number) => {
     const path = typeof nodeOrPath === 'string' ? nodeOrPath : nodeOrPath.path;
     const name = typeof nodeOrPath === 'string' ? path.split(/[\\/]/).pop() || path : nodeOrPath.name;
@@ -148,12 +161,11 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
         case 'newFile': {
           const dir = targetDir || parentDirForFile;
           if (!dir) return;
-          const n = prompt('File name:');
-          if (!n?.trim()) return;
+          const n = await showPrompt('New File', '', 'filename.ext');
+          if (!n.trim()) return;
           const r = await window.electronAPI.createFile(dir, n.trim());
           if (!r.success) { alert(r.error); return; }
           if (r.path) {
-            const fr = await window.electronAPI.readFile(r.path);
             onFileSelect({ name: n.trim(), path: r.path, type: 'file' });
           }
           onRefreshTree();
@@ -162,8 +174,8 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
         case 'newFolder': {
           const dir = targetDir;
           if (!dir) return;
-          const n = prompt('Folder name:');
-          if (!n?.trim()) return;
+          const n = await showPrompt('New Folder', '', 'folder-name');
+          if (!n.trim()) return;
           const r = await window.electronAPI.createFolder(dir, n.trim());
           if (!r.success) alert(r.error);
           onRefreshTree();
@@ -178,8 +190,8 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
           break;
         }
         case 'rename': {
-          const n = prompt('New name:', data.name);
-          if (!n?.trim() || n.trim() === data.name) return;
+          const n = await showPrompt('Rename', data.name, 'new name');
+          if (!n.trim() || n.trim() === data.name) return;
           const r = await window.electronAPI.renamePath(data.path, n.trim());
           if (!r.success) alert(r.error);
           onRefreshTree();
@@ -203,10 +215,9 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
       console.error('[file-action] error:', action, err);
       alert(`Operation failed: ${err}`);
     }
-  }, [rootPath, onRefreshTree, onFileSelect]);
+  }, [rootPath, showPrompt, onRefreshTree, onFileSelect]);
 
   const handleRootContext = (e: React.MouseEvent) => {
-    // Only open root menu when right-clicking background directly (not child elements)
     e.preventDefault();
     if (!rootPath) return;
     openMenu('root', rootPath, e.clientX, e.clientY);
@@ -216,17 +227,40 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
     openMenu(kind, node, x, y);
   }, [openMenu]);
 
+  const onDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!rootPath || !e.dataTransfer.files.length) return;
+    const sourcePaths: string[] = [];
+    for (let i = 0; i < e.dataTransfer.files.length; i++) {
+      const f = e.dataTransfer.files[i] as any;
+      if (f.path) sourcePaths.push(f.path);
+    }
+    if (sourcePaths.length === 0) return;
+    const r = await window.electronAPI.copyExternalFiles(rootPath, sourcePaths);
+    if (!r.success) alert(r.error);
+    else onRefreshTree();
+  }, [rootPath, onRefreshTree]);
+
   if (!tree || !tree.children) {
     return (
-      <div className="tree-empty" onContextMenu={handleRootContext}>
+      <div className="tree-empty" onContextMenu={handleRootContext} onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
         <span className="tree-empty-text">Empty folder</span>
         {menu && <ContextMenu data={menu} onClose={closeMenu} onAction={handleAction} />}
+        {promptState && (
+          <PromptModal
+            title={promptState.title}
+            defaultValue={promptState.defaultValue}
+            placeholder={promptState.placeholder}
+            onConfirm={(v) => { setPromptState(null); promptState.resolve(v); }}
+            onCancel={() => { setPromptState(null); promptState.resolve(''); }}
+          />
+        )}
       </div>
     );
   }
 
   return (
-    <div className="file-list" onContextMenu={handleRootContext}>
+    <div className="file-list" onContextMenu={handleRootContext} onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
       {tree.children.map((child) => (
         <TreeNode
           key={child.path}
@@ -238,6 +272,15 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
         />
       ))}
       {menu && <ContextMenu data={menu} onClose={closeMenu} onAction={handleAction} />}
+      {promptState && (
+        <PromptModal
+          title={promptState.title}
+          defaultValue={promptState.defaultValue}
+          placeholder={promptState.placeholder}
+          onConfirm={(v) => { setPromptState(null); promptState.resolve(v); }}
+          onCancel={() => { setPromptState(null); promptState.resolve(''); }}
+        />
+      )}
     </div>
   );
 };
