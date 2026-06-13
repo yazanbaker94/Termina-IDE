@@ -6,6 +6,19 @@ interface ToolbarProps {
   onToggleFiles: () => void;
 }
 
+const handleWindowControl = async (action: 'minimize' | 'maximizeToggle' | 'close', e: React.MouseEvent) => {
+  e.preventDefault();
+  e.stopPropagation();
+  console.log('[window-control]', action, 'clicked');
+  try {
+    const r = await window.electronAPI.windowControl(action);
+    console.log('[window-control]', action, 'result:', r);
+    if (!r.success) console.error('[window-control]', action, 'failed:', r.error);
+  } catch (err) {
+    console.error('[window-control]', action, 'error:', err);
+  }
+};
+
 const Toolbar: React.FC<ToolbarProps> = ({ onOpenFolder, onToggleFiles }) => {
   return (
     <div className="toolbar">
@@ -25,21 +38,21 @@ const Toolbar: React.FC<ToolbarProps> = ({ onOpenFolder, onToggleFiles }) => {
         <div className="window-controls">
           <button
             className="window-control-btn"
-            onClick={() => window.electronAPI.minimizeWindow()}
+            onClick={(e) => handleWindowControl('minimize', e)}
             title="Minimize"
           >
             <Minus size={13} />
           </button>
           <button
             className="window-control-btn"
-            onClick={() => window.electronAPI.maximizeToggleWindow()}
+            onClick={(e) => handleWindowControl('maximizeToggle', e)}
             title="Maximize"
           >
             <Square size={11} />
           </button>
           <button
             className="window-control-btn window-close-btn"
-            onClick={() => window.electronAPI.closeWindow()}
+            onClick={(e) => handleWindowControl('close', e)}
             title="Close"
           >
             <X size={13} />

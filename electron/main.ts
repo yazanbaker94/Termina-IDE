@@ -622,21 +622,15 @@ function setupIPC() {
     }
   });
 
-  ipcMain.handle('window:minimize', async () => {
-    mainWindow?.minimize();
-  });
-
-  ipcMain.handle('window:maximizeToggle', async () => {
-    if (!mainWindow) return;
-    if (mainWindow.isMaximized()) {
-      mainWindow.unmaximize();
-    } else {
-      mainWindow.maximize();
-    }
-  });
-
-  ipcMain.handle('window:close', async () => {
-    mainWindow?.close();
+  ipcMain.handle('window:control', async (_event, action: string) => {
+    console.log('[window-control]', action);
+    const win = BrowserWindow.fromWebContents(_event.sender);
+    if (!win) return { success: false, error: 'No window' };
+    if (action === 'minimize') win.minimize();
+    else if (action === 'maximizeToggle') win.isMaximized() ? win.unmaximize() : win.maximize();
+    else if (action === 'close') win.close();
+    else return { success: false, error: 'Unknown action' };
+    return { success: true };
   });
 
   ipcMain.handle('fs:createFile', async (_event, parentDir: string, name: string) => {

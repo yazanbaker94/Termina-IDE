@@ -130,9 +130,7 @@ export interface ElectronAPI {
   unstageFile: (filePath: string) => Promise<{ success: boolean }>;
   commitGit: (message: string) => Promise<GitCommitResult>;
   openProjectPath: (folderPath: string) => Promise<OpenProjectPathResult>;
-  minimizeWindow: () => Promise<void>;
-  maximizeToggleWindow: () => Promise<void>;
-  closeWindow: () => Promise<void>;
+  windowControl: (action: 'minimize' | 'maximizeToggle' | 'close') => Promise<{ success: boolean; error?: string }>;
   createFile: (parentDir: string, name: string) => Promise<{ success: boolean; error?: string; path?: string }>;
   createFolder: (parentDir: string, name: string) => Promise<{ success: boolean; error?: string; path?: string }>;
   renamePath: (oldPath: string, newName: string) => Promise<{ success: boolean; error?: string; path?: string }>;
