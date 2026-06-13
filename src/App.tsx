@@ -665,7 +665,14 @@ const App: React.FC = () => {
 
   const showEditor = !!activeFile || !!activeDiff;
   const rightDockOpen = filesDrawerVisible || showEditor;
-  const dockChangeCount = (filesDrawerVisible ? 1 : 0) + (showEditor ? 1 : 0) + (activeFile?.path?.length ?? 0) + (activeDiff?.filePath?.length ?? 0);
+  const [dockResizeTick, setDockResizeTick] = useState(0);
+  const prevDockOpenRef = useRef(rightDockOpen);
+  useEffect(() => {
+    if (rightDockOpen !== prevDockOpenRef.current) {
+      prevDockOpenRef.current = rightDockOpen;
+      setDockResizeTick((t) => t + 1);
+    }
+  }, [rightDockOpen]);
 
   return (
     <div className="app-container">
@@ -696,7 +703,7 @@ const App: React.FC = () => {
                 status={activeRuntime?.agentStatus ?? 'idle'} exitCode={activeRuntime?.exitCode ?? null}
                 error={activeRuntime?.error ?? ''} changedFiles={activeRuntime?.changedFiles ?? []}
                 terminalBuffer={activeRuntime?.terminalBuffer ?? ''} restartCount={activeRuntime?.restartCount ?? 0}
-                resizeSignal={dockChangeCount}
+                resizeSignal={dockResizeTick}
                 hasProject={hasProject} sessionLabel={activeSession?.label ?? null}
                 onRenameSession={handleRenameSession}
                 onWrite={(input) => handleWriteAgent(activeSessionId, input)}

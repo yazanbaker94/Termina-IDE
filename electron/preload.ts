@@ -48,4 +48,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deletePath: (targetPath: string) => ipcRenderer.invoke('fs:deletePath', targetPath),
   revealInExplorer: (targetPath: string) => ipcRenderer.invoke('fs:revealInExplorer', targetPath),
   pasteFromClipboard: (targetDir: string) => ipcRenderer.invoke('fs:pasteFromClipboard', targetDir),
+  copyExternalFiles: (targetDir: string, sourcePaths: string[]) => ipcRenderer.invoke('fs:copyExternalFiles', targetDir, sourcePaths),
 });

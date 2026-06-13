@@ -139,4 +139,5 @@ export interface ElectronAPI {
   deletePath: (targetPath: string) => Promise<{ success: boolean; error?: string }>;
   revealInExplorer: (targetPath: string) => Promise<{ success: boolean; error?: string }>;
   pasteFromClipboard: (targetDir: string) => Promise<{ success: boolean; error?: string; path?: string }>;
+  copyExternalFiles: (targetDir: string, sourcePaths: string[]) => Promise<{ success: boolean; error?: string; count?: number }>;
 }

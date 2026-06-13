@@ -731,6 +731,40 @@ function setupIPC() {
       return { success: false, error: err.message };
     }
   });
+
+  ipcMain.handle('fs:copyExternalFiles', async (_event, targetDir: string, sourcePaths: string[]) => {
+    try {
+      const resolvedDir = safeResolvePath(targetDir);
+      let count = 0;
+      for (const src of sourcePaths) {
+        try {
+          const srcName = path.basename(src);
+          let dest = path.join(resolvedDir, srcName);
+          if (fs.existsSync(dest)) {
+            const ext = path.extname(srcName);
+            const base = path.basename(srcName, ext);
+            let copyName = `${base} copy${ext}`;
+            let copyIdx = 2;
+            while (fs.existsSync(path.join(resolvedDir, copyName))) {
+              copyName = `${base} copy ${copyIdx}${ext}`;
+              copyIdx++;
+            }
+            dest = path.join(resolvedDir, copyName);
+          }
+          const stat = fs.statSync(src);
+          if (stat.isDirectory()) {
+            fs.cpSync(src, dest, { recursive: true, errorOnExist: false });
+          } else {
+            fs.copyFileSync(src, dest);
+          }
+          count++;
+        } catch {}
+      }
+      return { success: true, count };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
 }
 
 function createWindow() {
