@@ -8,6 +8,7 @@ export interface StoredProject {
 export interface StoredSession {
   id: string;
   projectId: string;
+  rootPath: string;
   label: string;
   createdAt: number;
   updatedAt?: number;
@@ -16,9 +17,7 @@ export interface StoredSession {
 
 export interface AppData {
   projects: StoredProject[];
-  sessions: StoredSession[];
   activeProjectId: string | null;
-  activeSessionIdByProjectId?: Record<string, string>;
 }
 
 const STORAGE_KEY = 'command-code-ide-data';
@@ -30,13 +29,11 @@ export function loadAppData(): AppData {
       const data = JSON.parse(raw) as Partial<AppData>;
       return {
         projects: data.projects ?? [],
-        sessions: data.sessions ?? [],
         activeProjectId: data.activeProjectId ?? null,
-        activeSessionIdByProjectId: data.activeSessionIdByProjectId ?? {},
       };
     }
   } catch {}
-  return { projects: [], sessions: [], activeProjectId: null, activeSessionIdByProjectId: {} };
+  return { projects: [], activeProjectId: null };
 }
 
 export function saveAppData(data: AppData): void {

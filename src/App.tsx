@@ -26,12 +26,12 @@ const defaultRuntime = (): SessionRuntimeState => ({
 
 const App: React.FC = () => {
   const [appData, setAppData] = useState<AppData>(loadAppData);
-  const { projects, sessions, activeProjectId } = appData;
+  const { projects, activeProjectId } = appData;
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
 
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(
-    activeProjectId ? (appData.activeSessionIdByProjectId?.[activeProjectId] ?? null) : null,
-  );
+  // Runtime-only sessions — never persisted
+  const [sessions, setSessions] = useState<StoredSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
 
   const [projectName, setProjectName] = useState<string | null>(null);
@@ -47,6 +47,7 @@ const App: React.FC = () => {
   const [filesDrawerVisible, setFilesDrawerVisible] = useState(false);
 
   const [sessionRuntime, setSessionRuntime] = useState<Record<string, SessionRuntimeState>>({});
+  const [rejectingAll, setRejectingAll] = useState(false);
 
   const activeRuntime = activeSessionId ? sessionRuntime[activeSessionId] : null;
 
@@ -68,6 +69,7 @@ const App: React.FC = () => {
 
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
+  const activeSessionByProjectIdRef = useRef<Record<string, string>>({});
   const sessionRuntimeRef = useRef(sessionRuntime);
   sessionRuntimeRef.current = sessionRuntime;
   const sessionsRef = useRef(sessions);
@@ -75,19 +77,6 @@ const App: React.FC = () => {
 
   const isDirty = activeFile ? activeFile.content !== savedContent : false;
   isDirtyRef.current = isDirty;
-
-  const persistSessions = useCallback((newSessions: StoredSession[], newActiveId: string | null) => {
-    const data: AppData = {
-      ...appData,
-      sessions: newSessions,
-      activeSessionIdByProjectId: {
-        ...appData.activeSessionIdByProjectId,
-        ...(activeProjectId && newActiveId ? { [activeProjectId]: newActiveId } : {}),
-      },
-    };
-    setAppData(data);
-    saveAppData(data);
-  }, [appData, activeProjectId]);
 
   // Auto-reopen active project on startup
   useEffect(() => {
@@ -186,10 +175,12 @@ const App: React.FC = () => {
       const runningIds = new Set(Object.keys(status.running));
       setSessionRuntime((prev) => {
         const next = { ...prev };
+        // Set running for sessions whose PTY is alive
         for (const id of runningIds) {
           const current = next[id] ?? defaultRuntime();
           next[id] = { ...current, agentStatus: 'running', exitCode: null, error: '' };
         }
+        // Mark sessions that think they're running/starting but PTY is gone as idle
         for (const [sid, rt] of Object.entries(next)) {
           if (!runningIds.has(sid) && (rt.agentStatus === 'running' || rt.agentStatus === 'starting')) {
             next[sid] = { ...rt, agentStatus: 'idle' };
@@ -259,38 +250,29 @@ const App: React.FC = () => {
       setFilesDrawerVisible(false);
       agentHasRunRef.current = false;
 
-      persist({
+      const updated = {
+        ...appData,
+        activeProjectId: project.id,
         projects: appData.projects.map((p) =>
           p.id === project.id ? { ...p, openedAt: Date.now() } : p,
         ),
-        sessions: appData.sessions,
-        activeProjectId: project.id,
-        activeSessionIdByProjectId: appData.activeSessionIdByProjectId,
-      });
+      };
+      persist(updated);
 
-      // Select target session or restore last active
+      // Select target session or restore last active from runtime
       const projectSessions = sessionsRef.current.filter((s) => s.projectId === project.id);
       let finalSessionId: string | null = null;
       if (targetSessionId && projectSessions.some((s) => s.id === targetSessionId)) {
         finalSessionId = targetSessionId;
       } else if (projectSessions.length > 0) {
-        const cached = appData.activeSessionIdByProjectId?.[project.id];
+        const cached = activeSessionByProjectIdRef.current[project.id];
         finalSessionId = (cached && projectSessions.some((s) => s.id === cached))
           ? cached
           : projectSessions[projectSessions.length - 1].id;
       }
       setActiveSessionId(finalSessionId);
-
       if (finalSessionId) {
-        persist({
-          projects: appData.projects,
-          sessions: appData.sessions,
-          activeProjectId: project.id,
-          activeSessionIdByProjectId: {
-            ...appData.activeSessionIdByProjectId,
-            [project.id]: finalSessionId,
-          },
-        });
+        activeSessionByProjectIdRef.current[project.id] = finalSessionId;
       }
 
       setGitStatus(null);
@@ -298,6 +280,7 @@ const App: React.FC = () => {
       await reconcileAgentStatus();
 
       const unsubFs = window.electronAPI.onFileChanged((evt: FileChangeEvent) => {
+        // TODO: attribute to correct session when multi-agent file tracking is implemented
         const owningId = activeSessionIdRef.current;
         if (owningId) {
           const rt = sessionRuntimeRef.current[owningId];
@@ -391,21 +374,16 @@ const App: React.FC = () => {
         });
       }
 
-      if (activeProjectId) {
-        persist({
-          projects: appData.projects,
-          sessions: appData.sessions,
-          activeProjectId,
-          activeSessionIdByProjectId: {
-            ...appData.activeSessionIdByProjectId,
-            [activeProjectId]: sessionId,
-          },
-        });
+      const selectedSession = sessionsRef.current.find((s) => s.id === sessionId);
+      if (selectedSession && activeProjectId) {
+        activeSessionByProjectIdRef.current[activeProjectId] = sessionId;
       }
 
       const nextRuntime = sessionRuntime[sessionId];
       setActiveDiff(null);
       setActiveSessionId(sessionId);
+
+      // Ensure runtime status is accurate for this session
       reconcileAgentStatus();
 
       if (nextRuntime?.activeFilePath) {
@@ -420,7 +398,7 @@ const App: React.FC = () => {
         setActiveFile(null); setSavedContent('');
       }
     },
-    [activeSessionId, activeProjectId, appData, persist, sessionRuntime, updateSessionRuntime, reconcileAgentStatus],
+    [activeSessionId, activeProjectId, sessionRuntime, updateSessionRuntime, reconcileAgentStatus],
   );
 
   const handleNewChat = useCallback(async () => {
@@ -438,16 +416,22 @@ const App: React.FC = () => {
     const sessionId = generateId();
     const projectChats = sessions.filter((s) => s.projectId === activeProjectId);
     const newSession: StoredSession = {
-      id: sessionId, projectId: activeProjectId,
-      label: `Chat ${projectChats.length + 1}`, createdAt: Date.now(),
+      id: sessionId,
+      projectId: activeProjectId,
+      rootPath: rootPath ?? '',
+      label: `Chat ${projectChats.length + 1}`,
+      createdAt: Date.now(),
     };
     const newSessions = [...sessions, newSession];
+    setSessions(newSessions);
     setActiveSessionId(sessionId);
-    persistSessions(newSessions, sessionId);
+    if (activeProjectId) {
+      activeSessionByProjectIdRef.current[activeProjectId] = sessionId;
+    }
 
     setActiveFile(null); setSavedContent(''); setActiveDiff(null);
-    await startAgentWithListeners(sessionId, rootPath ?? '');
-  }, [activeProjectId, rootPath, sessions, persistSessions, updateSessionRuntime, startAgentWithListeners]);
+    await startAgentWithListeners(sessionId, newSession.rootPath);
+  }, [activeProjectId, rootPath, sessions, updateSessionRuntime, startAgentWithListeners]);
 
   const handleOpenFolder = useCallback(async () => {
     try {
@@ -464,45 +448,36 @@ const App: React.FC = () => {
       setFilesDrawerVisible(false);
       agentHasRunRef.current = false;
 
-      const existingProject = appData.projects.find((p) => p.rootPath === result.rootPath);
+      let current = { ...appData };
+      const existingProject = current.projects.find((p) => p.rootPath === result.rootPath);
       let projectId: string;
-      let updatedProjects: StoredProject[];
       if (existingProject) {
         projectId = existingProject.id;
-        updatedProjects = appData.projects.map((p) =>
-          p.id === projectId ? { ...p, openedAt: Date.now() } : p,
-        );
+        existingProject.openedAt = Date.now();
       } else {
         projectId = generateId();
-        updatedProjects = [...appData.projects, { id: projectId, name: result.projectName, rootPath: result.rootPath, openedAt: Date.now() }];
+        current.projects = [...current.projects, { id: projectId, name: result.projectName, rootPath: result.rootPath, openedAt: Date.now() }];
       }
 
-      const projectSessions = sessions.filter((s) => s.projectId === projectId);
-      let finalSessionId: string | null = null;
+      current.activeProjectId = projectId;
+      persist(current);
+
+      // Select last active chat for this project from runtime state
+      const projectSessions = sessionsRef.current.filter((s) => s.projectId === projectId);
       if (projectSessions.length > 0) {
-        const cached = appData.activeSessionIdByProjectId?.[projectId];
-        finalSessionId = (cached && projectSessions.some((s) => s.id === cached))
+        const cached = activeSessionByProjectIdRef.current[projectId];
+        const targetId = (cached && projectSessions.some((s) => s.id === cached))
           ? cached
           : projectSessions[projectSessions.length - 1].id;
+        setActiveSessionId(targetId);
+        activeSessionByProjectIdRef.current[projectId] = targetId;
+        await reconcileAgentStatus();
+      } else {
+        setActiveSessionId(null);
       }
 
-      persist({
-        projects: updatedProjects,
-        sessions: appData.sessions,
-        activeProjectId: projectId,
-        activeSessionIdByProjectId: {
-          ...appData.activeSessionIdByProjectId,
-          ...(finalSessionId ? { [projectId]: finalSessionId } : {}),
-        },
-      });
-
-      setActiveSessionId(finalSessionId);
-
-      setGitStatus(null);
-      refreshGitStatus();
-      await reconcileAgentStatus();
-
       const unsubFs = window.electronAPI.onFileChanged((evt: FileChangeEvent) => {
+        // TODO: attribute to correct session when multi-agent file tracking is implemented
         const owningId = activeSessionIdRef.current;
         if (owningId) {
           const rt = sessionRuntimeRef.current[owningId];
@@ -555,7 +530,7 @@ const App: React.FC = () => {
     } catch (err) {
       console.error('Failed to open folder:', err);
     }
-  }, [appData, persist, sessions, refreshFileTree, refreshGitStatus, updateSessionRuntime, reconcileAgentStatus]);
+  }, [appData, persist, refreshFileTree, refreshGitStatus, updateSessionRuntime, reconcileAgentStatus]);
 
   const handleFileSelect = useCallback(async (node: FileNode) => {
     if (node.type === 'directory') return;
@@ -602,16 +577,12 @@ const App: React.FC = () => {
     }
     setSessionRuntime(cleanedRuntime);
     const remainingSessions = sessions.filter((s) => s.projectId !== projectId);
+    setSessions(remainingSessions);
     const updatedProjects = appData.projects.filter((p) => p.id !== projectId);
     const newActiveId = projectId === activeProjectId
       ? (updatedProjects.length > 0 ? updatedProjects[0].id : null)
       : activeProjectId;
-    const newData: AppData = {
-      projects: updatedProjects,
-      sessions: remainingSessions,
-      activeProjectId: newActiveId,
-      activeSessionIdByProjectId: appData.activeSessionIdByProjectId,
-    };
+    const newData: AppData = { projects: updatedProjects, activeProjectId: newActiveId };
     setAppData(newData);
     saveAppData(newData);
     if (projectId === activeProjectId) {
@@ -641,21 +612,24 @@ const App: React.FC = () => {
   }, []);
 
   const handleWriteAgent = useCallback(async (sessionId: string, input: string) => {
-    try { await window.electronAPI.writeAgent(sessionId, input); }
-    catch (err) { console.error('Failed to write to agent:', err); }
-  }, []);
+    try {
+      const result = await window.electronAPI.writeAgent(sessionId, input);
+      if (!result.success) {
+        updateSessionRuntime(sessionId, { agentStatus: 'idle' });
+        reconcileAgentStatus();
+      }
+    } catch (err) {
+      console.error('Failed to write to agent:', err);
+    }
+  }, [updateSessionRuntime, reconcileAgentStatus]);
 
   const handleRenameSession = useCallback((sessionId: string, newLabel: string) => {
-    const updated = sessions.map((s) =>
-      s.id === sessionId ? { ...s, label: newLabel, renamedFromPrompt: true, updatedAt: Date.now() } : s,
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === sessionId ? { ...s, label: newLabel, renamedFromPrompt: true, updatedAt: Date.now() } : s,
+      ),
     );
-    persist({
-      projects: appData.projects,
-      sessions: updated,
-      activeProjectId: appData.activeProjectId,
-      activeSessionIdByProjectId: appData.activeSessionIdByProjectId,
-    });
-  }, [appData, sessions, persist]);
+  }, []);
 
   const handleXtermWriteReady = useCallback((sessionId: string, writeFn: ((data: string) => void) | null) => {
     xtermWriteRef.current = { sessionId, write: writeFn };
