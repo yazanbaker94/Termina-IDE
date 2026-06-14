@@ -1,5 +1,6 @@
 
 <!-- test comment -->
+<!-- sup -->
 
 # Command Code IDE
 
@@ -13,6 +14,7 @@ Desktop IDE for [Command Code CLI][cc] — an Electron + React + TypeScript app 
 - **Monaco Editor** — full IntelliSense code editing with syntax highlighting
 - **Agent Terminal** — embedded xterm.js terminal running Command Code CLI via node-pty
 - **Git Integration** — staged/unstaged file list, stage/unstage/commit with status bar feedback
+- **Clipboard Paste** — paste screenshots, images from clipboard, or files into the project. On Windows, falls back to Explorer's FileDropList via PowerShell when Electron's clipboard API misses Explorer-copied files.
 - **Diff Viewer** — view before/after file diffs from agent changes, revert individual files
 - **Resizable Panels** — drag to resize sidebar, editor, and agent panel
 - **Dark Theme** — Catppuccin-inspired color palette

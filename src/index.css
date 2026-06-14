@@ -1,18 +1,20 @@
 :root {
-  --bg-primary: #1e1e2e;
-  --bg-secondary: #181825;
-  --bg-tertiary: #11111b;
-  --bg-surface: #313244;
-  --bg-hover: #45475a;
-  --text-primary: #cdd6f4;
-  --text-secondary: #a6adc8;
-  --text-muted: #6c7086;
-  --accent: #cba6f7;
-  --accent-dim: rgba(203, 166, 247, 0.15);
-  --border: #313244;
-  --border-subtle: #282838;
-  --green: #a6e3a1;
-  --blue: #89b4fa;
+  --bg-primary: #0a0a14;
+  --bg-secondary: #10101f;
+  --bg-tertiary: #080812;
+  --bg-surface: #1a1a30;
+  --bg-hover: #262644;
+  --text-primary: #e4e0f4;
+  --text-secondary: #b0b8d4;
+  --text-muted: #5e5c74;
+  --accent: #a78bfa;
+  --accent-dim: rgba(167, 139, 250, 0.12);
+  --accent-glow: rgba(167, 139, 250, 0.08);
+  --border: #1e1e36;
+  --border-subtle: #16162a;
+  --teal: #2dd4bf;
+  --red: #f87171;
+  --yellow: #facc15;
   --toolbar-height: 40px;
   --bottombar-height: 26px;
   --session-rail-width: 210px;
@@ -63,7 +65,6 @@ body {
   overflow: hidden;
 }
 
-/* Agent region fills remaining workspace, shrinks when dock opens */
 .agent-region {
   flex: 1;
   min-width: 0;
@@ -77,7 +78,6 @@ body {
   min-width: 0;
 }
 
-/* Right dock — flex child that pushes terminal */
 .right-dock {
   display: flex;
   align-items: stretch;
@@ -107,7 +107,6 @@ body {
   flex-shrink: 0;
 }
 
-/* Code review pane inside dock */
 .code-review-pane {
   width: var(--code-pane-width);
   min-width: 280px;
@@ -129,7 +128,7 @@ body {
 .code-review-tabs {
   display: flex;
   align-items: center;
-  background: var(--bg-secondary);
+  background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-subtle);
   padding: 0 4px;
   height: 32px;
@@ -160,23 +159,6 @@ body {
   background: var(--bg-primary);
 }
 
-.app-agent-pane {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.app-agent-pane.with-editor {
-  /* terminal stays full size, dock overlays right side */
-}
-
-.agent-region .agent-panel {
-  flex: 1;
-  min-width: 0;
-}
-
 .app-no-session {
   flex: 1;
   display: flex;
@@ -190,7 +172,7 @@ body {
 .app-no-session-icon {
   color: var(--text-muted);
   margin-bottom: 4px;
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 .app-no-session-text {
@@ -233,10 +215,10 @@ body {
   flex: 1;
   height: 30px;
   padding: 0 10px;
-  border: none;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--accent-dim);
-  color: var(--accent);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
@@ -244,8 +226,9 @@ body {
 }
 
 .session-new-chat-btn:hover {
-  background: var(--accent);
-  color: var(--bg-tertiary);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent);
 }
 
 .session-sidebar-icon-btn {
@@ -306,13 +289,14 @@ body {
 .session-sidebar-open-btn:hover {
   background: var(--bg-surface);
   color: var(--text-primary);
-  border-color: var(--bg-hover);
+  border-color: var(--accent);
 }
 
 .session-project-group {
   padding: 2px 0;
   position: relative;
 }
+
 .project-disclosure {
   display: flex;
   align-items: center;
@@ -343,6 +327,7 @@ body {
   cursor: pointer;
   text-align: left;
   transition: all 0.1s ease;
+  border-left: 2px solid transparent;
 }
 
 .session-project-row:hover {
@@ -351,8 +336,9 @@ body {
 }
 
 .session-project-row.active {
-  background: var(--accent-dim);
+  background: var(--accent-glow);
   color: var(--text-primary);
+  border-left-color: var(--accent);
 }
 
 .session-project-menu-btn {
@@ -389,7 +375,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
 }
 
 .session-context-menu-item {
@@ -466,6 +452,7 @@ body {
   cursor: pointer;
   text-align: left;
   transition: all 0.1s ease;
+  border-left: 2px solid transparent;
 }
 
 .session-chat-row:hover {
@@ -474,8 +461,9 @@ body {
 }
 
 .session-chat-row.active {
-  background: var(--accent-dim);
+  background: var(--accent-glow);
   color: var(--accent);
+  border-left-color: var(--accent);
 }
 
 .session-chat-icon {
@@ -521,7 +509,7 @@ body {
   color: var(--text-primary);
 }
 
-/* ===== Files Drawer (dock pane) ===== */
+/* ===== Files Drawer ===== */
 
 .files-drawer {
   flex: 1;
@@ -541,7 +529,7 @@ body {
 .files-drawer-title {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
   color: var(--text-muted);
   text-transform: uppercase;
 }
@@ -603,17 +591,13 @@ body {
 .files-drawer-open-btn:hover {
   background: var(--bg-surface);
   color: var(--text-primary);
-  border-color: var(--bg-hover);
+  border-color: var(--accent);
 }
 
 .files-drawer-section {
   padding: 4px 0;
   overflow-y: auto;
   flex: 1;
-}
-
-.files-drawer-section-title {
-  display: none;
 }
 
 .files-drawer-filter {
@@ -674,7 +658,7 @@ body {
   justify-content: space-between;
   height: var(--toolbar-height);
   background: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border);
   padding: 0 8px;
   -webkit-app-region: drag;
   user-select: none;
@@ -703,11 +687,12 @@ body {
 }
 
 .toolbar-brand {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-  letter-spacing: 0.5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 1px;
   padding: 0 8px;
+  text-transform: uppercase;
 }
 
 .toolbar-btn {
@@ -774,11 +759,11 @@ body {
 }
 
 .window-close-btn:hover {
-  background: #e81123;
+  background: var(--red);
   color: #fff;
 }
 
-/* ===== File Tree (shared by Sidebar and FilesDrawer) ===== */
+/* ===== File Tree ===== */
 
 .file-list {
   display: flex;
@@ -820,21 +805,21 @@ body {
 
 .file-item.selected,
 .tree-folder.selected {
-  outline: 1px solid var(--accent);
-  outline-offset: -1px;
-  background: rgba(203, 166, 247, 0.08);
-}
-
-.file-item.selected.active,
-.tree-folder.selected.active {
-  outline-color: var(--accent);
-  background: var(--accent-dim);
+  background: var(--accent-glow);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 4px 4px 0;
 }
 
 .file-item.active,
 .tree-folder.active {
   background: var(--accent-dim);
   color: var(--accent);
+}
+
+.file-item.selected.active,
+.tree-folder.selected.active {
+  background: var(--accent-dim);
+  border-left: 2px solid var(--accent);
 }
 
 .file-status-bar,
@@ -844,6 +829,7 @@ body {
   padding: 2px 8px;
   text-align: center;
   font-style: italic;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .file-icon {
@@ -874,9 +860,39 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
-/* ===== Inline Edit (File Tree) ===== */
+/* ===== File Row Hover Action Button ===== */
+
+.file-row-action {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.1s ease, background 0.1s ease, color 0.1s ease;
+  cursor: pointer;
+}
+
+.file-item:hover .file-row-action,
+.tree-folder:hover .file-row-action,
+.file-item.selected .file-row-action,
+.tree-folder.selected .file-row-action {
+  opacity: 1;
+}
+
+.file-row-action:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+/* ===== Inline Edit ===== */
 
 .file-item.editing {
   gap: 8px;
@@ -896,7 +912,7 @@ body {
   padding: 0 6px;
   border: 1px solid var(--accent);
   border-radius: 3px;
-  background: var(--bg-tertiary);
+  background: var(--bg-primary);
   color: var(--text-primary);
   font-size: 12px;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
@@ -904,12 +920,12 @@ body {
 }
 
 .file-edit-input-error {
-  border-color: #f38ba8;
+  border-color: var(--red);
 }
 
 .file-edit-error {
   font-size: 10px;
-  color: #f38ba8;
+  color: var(--red);
   padding: 0 4px;
   line-height: 1.2;
 }
@@ -925,15 +941,15 @@ body {
 .file-context-menu {
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-  min-width: 160px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  min-width: 170px;
   animation: context-menu-in 0.1s ease;
 }
 
 @keyframes context-menu-in {
-  from { opacity: 0; transform: scale(0.95); }
+  from { opacity: 0; transform: scale(0.96); }
   to { opacity: 1; transform: scale(1); }
 }
 
@@ -973,13 +989,25 @@ body {
   font-style: italic;
 }
 
+/* ===== Terminal Context Menu ===== */
+
+.term-context-menu {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  min-width: 140px;
+  animation: context-menu-in 0.1s ease;
+}
+
 /* ===== Prompt Modal ===== */
 
 .prompt-backdrop {
   position: fixed;
   inset: 0;
   z-index: 110;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -992,7 +1020,7 @@ body {
   padding: 16px;
   min-width: 320px;
   max-width: 420px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
 }
 
 .prompt-title {
@@ -1008,7 +1036,7 @@ body {
   padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg-tertiary);
+  background: var(--bg-primary);
   color: var(--text-primary);
   font-size: 13px;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
@@ -1041,6 +1069,7 @@ body {
   background: transparent;
   color: var(--text-muted);
 }
+
 .prompt-cancel:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
@@ -1048,13 +1077,14 @@ body {
 
 .prompt-confirm {
   background: var(--accent);
-  color: var(--bg-tertiary);
-}
-.prompt-confirm:hover {
-  opacity: 0.85;
+  color: var(--bg-primary);
 }
 
-/* ===== Editor (shared) ===== */
+.prompt-confirm:hover {
+  opacity: 0.9;
+}
+
+/* ===== Editor ===== */
 
 .tab-icon {
   font-size: 13px;
@@ -1094,20 +1124,6 @@ body {
 
 .editor-save-btn.dirty {
   color: var(--accent);
-}
-
-.diff-tab {
-  border-bottom-color: transparent;
-}
-
-.diff-badge {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 5px;
-  border-radius: 3px;
-  border: 1px solid currentColor;
-  opacity: 0.8;
 }
 
 .panel-action-btn {
@@ -1177,7 +1193,7 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #1e1e2e;
+  background: var(--bg-primary);
   overflow: auto;
 }
 
@@ -1192,7 +1208,7 @@ body {
 
 .image-preview-info {
   font-size: 11px;
-  color: #6c7086;
+  color: var(--text-muted);
   padding: 8px 0;
   flex-shrink: 0;
 }
@@ -1202,15 +1218,10 @@ body {
 .agent-panel {
   flex: 1;
   min-width: 0;
-  background: var(--bg-secondary);
-  border-left: none;
+  background: var(--bg-primary);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.agent-resize-handle {
-  display: none;
 }
 
 .agent-header {
@@ -1219,6 +1230,7 @@ body {
   justify-content: space-between;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
 }
 
 .agent-header-left {
@@ -1229,22 +1241,24 @@ body {
 }
 
 .agent-status-badge {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 7px;
   border-radius: 3px;
   white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-.agent-status-running { color: #a6e3a1; background: rgba(166, 227, 161, 0.12); }
-.agent-status-starting { color: #f9e2af; background: rgba(249, 226, 175, 0.12); }
-.agent-status-exited { color: #f38ba8; background: rgba(243, 139, 168, 0.12); }
+.agent-status-running { color: var(--teal); background: rgba(45, 212, 191, 0.12); }
+.agent-status-starting { color: var(--yellow); background: rgba(250, 204, 21, 0.12); }
+.agent-status-exited { color: var(--red); background: rgba(248, 113, 113, 0.12); }
 .agent-status-idle { color: var(--text-muted); background: var(--bg-surface); }
 
 .agent-title {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
   color: var(--text-muted);
   text-transform: uppercase;
 }
@@ -1332,7 +1346,7 @@ body {
 .agent-changed-title {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
   color: var(--text-muted);
   text-transform: uppercase;
   padding: 4px 12px 2px;
@@ -1366,13 +1380,13 @@ body {
 }
 
 .agent-review-btn.accept:hover {
-  color: #a6e3a1;
-  background: rgba(166, 227, 161, 0.12);
+  color: var(--teal);
+  background: rgba(45, 212, 191, 0.12);
 }
 
 .agent-review-btn.reject:hover {
-  color: #f38ba8;
-  background: rgba(243, 139, 168, 0.12);
+  color: var(--red);
+  background: rgba(248, 113, 113, 0.12);
 }
 
 .agent-changed-item-row {
@@ -1423,7 +1437,7 @@ body {
   background: transparent;
   color: var(--text-secondary);
   font-size: 11px;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
   cursor: pointer;
   text-align: left;
   overflow: hidden;
@@ -1434,17 +1448,9 @@ body {
   color: var(--text-primary);
 }
 
-.agent-changed-added {
-  color: #a6e3a1;
-}
-
-.agent-changed-changed {
-  color: #f9e2af;
-}
-
-.agent-changed-deleted {
-  color: #f38ba8;
-}
+.agent-changed-added { color: var(--teal); }
+.agent-changed-changed { color: var(--yellow); }
+.agent-changed-deleted { color: var(--red); }
 
 .agent-changed-icon {
   flex-shrink: 0;
@@ -1468,7 +1474,7 @@ body {
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 11px;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
   color: var(--text-secondary);
 }
 
@@ -1480,17 +1486,9 @@ body {
   text-align: left;
 }
 
-.git-status-modified {
-  color: #f9e2af;
-}
-
-.git-status-staged {
-  color: #a6e3a1;
-}
-
-.git-status-untracked {
-  color: var(--text-muted);
-}
+.git-status-modified { color: var(--yellow); }
+.git-status-staged { color: var(--teal); }
+.git-status-untracked { color: var(--text-muted); }
 
 .git-file-actions {
   display: flex;
@@ -1550,7 +1548,7 @@ body {
   padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg-tertiary);
+  background: var(--bg-primary);
   color: var(--text-primary);
   font-size: 11px;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
@@ -1581,7 +1579,7 @@ body {
 
 .git-commit-btn:hover:not(:disabled) {
   background: var(--accent);
-  color: var(--bg-tertiary);
+  color: var(--bg-primary);
 }
 
 .git-commit-btn:disabled {
@@ -1603,11 +1601,11 @@ body {
   gap: 6px;
   padding: 6px 10px;
   margin: 6px 8px;
-  background: rgba(243, 139, 168, 0.12);
-  border: 1px solid rgba(243, 139, 168, 0.25);
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.2);
   border-radius: 4px;
   font-size: 11px;
-  color: #f38ba8;
+  color: var(--red);
   flex-shrink: 0;
 }
 
@@ -1618,13 +1616,29 @@ body {
 .agent-ended-banner {
   padding: 6px 12px;
   margin: 4px 8px 0;
-  background: rgba(243, 139, 168, 0.08);
-  border: 1px solid rgba(243, 139, 168, 0.18);
+  background: rgba(248, 113, 113, 0.06);
+  border: 1px solid rgba(248, 113, 113, 0.12);
   border-radius: 4px;
   font-size: 11px;
-  color: #f38ba8;
+  color: var(--red);
   text-align: center;
   flex-shrink: 0;
+}
+
+/* ===== Diff Badge ===== */
+
+.diff-badge {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  opacity: 0.8;
+}
+
+.diff-tab {
+  border-bottom-color: transparent;
 }
 
 /* ===== Bottom Bar ===== */
@@ -1635,7 +1649,7 @@ body {
   justify-content: space-between;
   height: var(--bottombar-height);
   background: var(--bg-tertiary);
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--border);
   padding: 0 12px;
   flex-shrink: 0;
   font-size: 11px;
@@ -1653,7 +1667,7 @@ body {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--green);
+  background: var(--teal);
 }
 
 .status-text {
@@ -1691,7 +1705,7 @@ body {
   display: flex;
   align-items: center;
   gap: 3px;
-  color: #a6e3a1;
+  color: var(--teal);
   font-size: 11px;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
@@ -1699,8 +1713,8 @@ body {
 /* ===== Scrollbar ===== */
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -1709,7 +1723,7 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--bg-surface);
-  border-radius: 4px;
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {

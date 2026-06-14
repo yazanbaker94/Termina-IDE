@@ -201,34 +201,27 @@ function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls
     }
   };
 
-  // FileNameW / FileName — Windows Explorer file copy with verbose debug
+  // FileNameW / FileName — Windows Explorer file copy
   const fileFormats = formats.filter((f: string) => f.toLowerCase().includes('filename'));
   for (const fmt of fileFormats) {
-    console.log(`[paste:fn] trying format: ${fmt}`);
     try {
       const raw = clipboard.readBuffer(fmt);
-      console.log(`[paste:fn] ${fmt} buffer length:`, raw?.length ?? 0);
       if (raw && raw.length > 0) {
         // Try UTF-16LE first (FileNameW on Windows)
         const text16 = Buffer.from(raw).toString('utf16le');
-        console.log(`[paste:fn] ${fmt} utf16le length:`, text16.length, 'preview:', text16.slice(0, 300));
         
         // Split by NUL characters — each is a separate path
         const entries = text16.split('\0').map(e => e.trim()).filter(Boolean);
-        console.log(`[paste:fn] ${fmt} null-split entries:`, entries.length);
         
         for (const entry of entries) {
           const classified = classifyClipboardUri(entry);
           if (classified) {
-            console.log(`[paste:fn] ${fmt} path: ${classified.kind} ${classified.kind === 'file' ? classified.path : classified.url}`);
             addItem(classified);
           } else {
-            console.log(`[paste:fn] ${fmt} unclassified entry:`, entry.slice(0, 200));
             // Try plain path fallback — some formats give bare Windows paths
             try {
               const resolved = path.resolve(entry);
               if (fs.existsSync(resolved)) {
-                console.log(`[paste:fn] ${fmt} found via path.resolve:`, resolved);
                 addItem({ kind: 'file', path: resolved });
               }
             } catch {}
@@ -238,20 +231,16 @@ function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls
         // Also try UTF-8 (FileName on older Windows or non-Windows)
         if (localPaths.length === 0) {
           const text8 = Buffer.from(raw).toString('utf8');
-          console.log(`[paste:fn] ${fmt} utf8 length:`, text8.length, 'preview:', text8.slice(0, 300));
           for (const entry of text8.split('\0').map(e => e.trim()).filter(Boolean)) {
             const classified = classifyClipboardUri(entry);
-            if (classified) {
-              console.log(`[paste:fn] ${fmt} utf8 path:`, classified.kind, classified.kind === 'file' ? classified.path : classified.url);
-              addItem(classified);
-            }
+            if (classified) addItem(classified);
           }
         }
       }
-    } catch (e) { console.log(`[paste:fn] ${fmt} failed:`, e); }
+    } catch {}
   }
 
-  // text/uri-list — all platforms, with robust extraction
+  // text/uri-list — all platforms
   if (formats.includes('text/uri-list')) {
     try {
       const text = readClipboardFormatText('text/uri-list');
@@ -260,18 +249,15 @@ function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls
         const buf = clipboard.readBuffer('text/uri-list');
         debug.uriListBufferLen = buf?.length ?? 0;
       } catch {}
-      console.log('[paste] text/uri-list len:', text?.length ?? 0, 'bufferLen:', debug.uriListBufferLen);
 
       if (text) {
         const uris = parseUriList(text);
-        console.log('[paste] text/uri-list parsed', uris.length, 'URIs');
         for (const uri of uris) {
           const classified = classifyClipboardUri(uri);
-          if (classified) { console.log('[paste] classified URI:', classified.kind, classified.kind === 'file' ? classified.path : classified.url); addItem(classified); }
-          else { console.log('[paste] unclassified URI:', uri.slice(0, 200)); }
+          if (classified) addItem(classified);
         }
       }
-    } catch (e) { console.log('[paste] text/uri-list failed:', e); }
+    } catch {}
   }
 
   // x-special/gnome-copied-files
@@ -279,7 +265,7 @@ function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls
     try {
       const text = readClipboardFormatText('x-special/gnome-copied-files');
       if (text) for (const uri of parseUriList(text)) { const r = classifyClipboardUri(uri); if (r) addItem(r); }
-    } catch (e) { console.log('[paste] gnome-copied-files failed:', e); }
+    } catch {}
   }
 
   // public.file-url
@@ -287,7 +273,7 @@ function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls
     try {
       const text = readClipboardFormatText('public.file-url');
       if (text) for (const line of text.split(/[\n\r]+/).filter(Boolean)) { const r = classifyClipboardUri(line.trim()); if (r) addItem(r); }
-    } catch (e) { console.log('[paste] public.file-url failed:', e); }
+    } catch {}
   }
 
   // public.url
@@ -295,7 +281,7 @@ function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls
     try {
       const text = readClipboardFormatText('public.url');
       if (text) for (const line of text.split(/[\n\r]+/).filter(Boolean)) { const r = classifyClipboardUri(line.trim()); if (r) addItem(r); }
-    } catch (e) { console.log('[paste] public.url failed:', e); }
+    } catch {}
   }
 
   // NSFilenamesPboardType
@@ -309,7 +295,7 @@ function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls
         if (stringMatches) for (const m of stringMatches) { const r = classifyClipboardUri(m.replace(/<\/?string>/g, '').trim()); if (r) addItem(r); }
         else for (const line of text.split(/[\n\r\0]+/)) { const r = classifyClipboardUri(line.trim()); if (r) addItem(r); }
       }
-    } catch (e) { console.log('[paste] NSFilenames failed:', e); }
+    } catch {}
   }
 
   // clipboard.readText() scan
@@ -444,7 +430,7 @@ function getClipboardImageBuffer(formats: string[]): { buffer: Buffer; ext: stri
         if (buffer && buffer.length > 0) {
           return { buffer, ext };
         }
-      } catch (e) { console.log(`[paste] readBuffer(${fmt}) failed:`, e); }
+      } catch {}
     }
   }
   return null;
@@ -491,36 +477,9 @@ function getImageFromHtmlOrText(): { buffer?: Buffer; ext?: string; error?: stri
     }
 
     if (remoteUrls.length > 0) return { remoteUrls };
-  } catch (e) { console.log('[paste] HTML/text parse failed:', e); }
+  } catch {}
 
   return {};
-}
-
-function logClipboardDebug(formats: string[]) {
-  console.log('[paste] platform:', process.platform);
-  console.log('[paste] formats:', formats);
-  try {
-    const text = clipboard.readText();
-    const html = clipboard.readHTML();
-    const img = clipboard.readImage();
-    console.log('[paste] readText length:', text?.length ?? 0);
-    if (text) console.log('[paste] readText preview:', text.slice(0, 300));
-    console.log('[paste] readHTML length:', html?.length ?? 0);
-    if (html) console.log('[paste] readHTML preview:', html.slice(0, 300));
-    console.log('[paste] readImage isEmpty:', img.isEmpty());
-    if (!img.isEmpty()) console.log('[paste] readImage size:', img.getSize());
-  } catch {}
-  for (const fmt of formats) {
-    try {
-      const buf = clipboard.readBuffer(fmt);
-      console.log(`[paste] buffer[${fmt}] length:`, buf?.length ?? 0);
-      if (buf && buf.length > 0) {
-        try { console.log(`[paste] ${fmt} utf8 preview:`, Buffer.from(buf).toString('utf8').slice(0, 300)); } catch {}
-        try { console.log(`[paste] ${fmt} utf16le preview:`, Buffer.from(buf).toString('utf16le').slice(0, 300)); } catch {}
-      }
-    } catch {}
-  }
-  console.log('[paste] nativeImage save will be attempted:', !clipboard.readImage().isEmpty());
 }
 
 function copyFilesToDir(resolvedDir: string, sourcePaths: string[]): { success: boolean; error?: string; path?: string; paths?: string[]; count?: number } {
@@ -536,7 +495,7 @@ function copyFilesToDir(resolvedDir: string, sourcePaths: string[]): { success: 
         fs.copyFileSync(src, dest);
       }
       copiedPaths.push(dest);
-    } catch (e) { console.log('[copy] failed:', src, e); }
+    } catch {}
   }
   if (copiedPaths.length === 0) return { success: false, error: 'Could not copy any files.' };
   return { success: true, count: copiedPaths.length, paths: copiedPaths, path: copiedPaths[0] };
@@ -553,11 +512,8 @@ function getWindowsClipboardFileDropList(): string[] {
     });
     if (!output) return [];
     const paths = output.split(/[\r\n]+/).map((l: string) => l.trim()).filter((p: string) => fs.existsSync(p));
-    console.log('[paste:windows-filedrop] paths found:', paths.length);
-    for (const p of paths) console.log('[paste:windows-filedrop]  ', p);
     return paths;
-  } catch (e: any) {
-    console.log('[paste:windows-filedrop] failed:', e.message);
+  } catch {
     return [];
   }
 }
@@ -772,10 +728,7 @@ function resolveCommandCode(): { command: string; args: string[] } | null {
 }
 
 function startAgent(sessionId: string, cwd: string): { success: boolean; error?: string } {
-  console.log(`[PTY] start session=${sessionId} cwd=${cwd}`);
-
   if (agentPtys.has(sessionId)) {
-    console.log(`[PTY] start session=${sessionId} already running, idempotent`);
     return { success: true };
   }
 
@@ -811,7 +764,6 @@ function startAgent(sessionId: string, cwd: string): { success: boolean; error?:
       cwd: cwd,
       env: { ...process.env } as { [key: string]: string },
     });
-    console.log(`[PTY] started session=${sessionId} pid=${(spawnedPty as any).pid} cwd=${cwd}`);
   } catch (err: any) {
     sessionRoots.delete(sessionId);
     return { success: false, error: `Failed to spawn agent: ${err.message}` };
@@ -819,7 +771,6 @@ function startAgent(sessionId: string, cwd: string): { success: boolean; error?:
 
   agentPtys.set(sessionId, spawnedPty);
   agentStopRequested.set(sessionId, false);
-  console.log(`[PTY] running sessions=[${[...agentPtys.keys()].join(', ')}]`);
 
   const owningSession = sessionId;
 
@@ -829,7 +780,6 @@ function startAgent(sessionId: string, cwd: string): { success: boolean; error?:
 
   spawnedPty.onExit(({ exitCode }: { exitCode: number }) => {
     const wasStopRequested = agentStopRequested.get(owningSession);
-    console.log(`[PTY] exit session=${owningSession} exitCode=${exitCode} stopRequested=${wasStopRequested}`);
     if (wasStopRequested) {
       sendToRenderer('agent:onExit', { sessionId: owningSession, exitCode: -1 });
     } else {
@@ -838,7 +788,6 @@ function startAgent(sessionId: string, cwd: string): { success: boolean; error?:
     agentPtys.delete(owningSession);
     agentStopRequested.delete(owningSession);
     sessionRoots.delete(owningSession);
-    console.log(`[PTY] running sessions=[${[...agentPtys.keys()].join(', ')}]`);
   });
 
   return { success: true };
@@ -997,7 +946,6 @@ function setupIPC() {
 
   ipcMain.handle('agent:write', async (_event, sessionId: string, input: string) => {
     const p = agentPtys.get(sessionId);
-    console.log(`[PTY] write session=${sessionId} exists=${!!p}`);
     if (!p) return { success: false };
     p.write(input);
     return { success: true };
@@ -1142,7 +1090,6 @@ function setupIPC() {
   });
 
   ipcMain.handle('project:openPath', async (_event, folderPath: string) => {
-    console.log(`[PTY] project switch to ${folderPath}, running=[${[...agentPtys.keys()].join(', ')}]`);
     try {
       const resolved = path.resolve(folderPath);
       if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
@@ -1166,7 +1113,6 @@ function setupIPC() {
   });
 
   ipcMain.handle('window:control', async (_event, action: string) => {
-    console.log('[window-control]', action);
     const win = BrowserWindow.fromWebContents(_event.sender);
     if (!win) return { success: false, error: 'No window' };
     if (action === 'minimize') win.minimize();
@@ -1241,17 +1187,12 @@ function setupIPC() {
     try {
       const resolvedDir = safeResolvePath(targetDir);
       const formats = clipboard.availableFormats('clipboard');
-      console.log('=== [paste:start] targetDir:', resolvedDir);
-      logClipboardDebug(formats);
-
       // 1. Try native bitmap image FIRST (screenshot, browser Copy Image)
       const nativeResult = saveNativeImage(resolvedDir);
-      console.log('[paste:step1] native image result:', nativeResult.success, nativeResult.path);
       if (nativeResult.success) return nativeResult;
 
       // 2. Try raw image buffers (e.g. image/png, image/jpeg, public.png)
       const imageBuffer = getClipboardImageBuffer(formats);
-      console.log('[paste:step2] image buffer found:', !!imageBuffer, imageBuffer?.ext);
       if (imageBuffer) {
         return writeImageBuffer(resolvedDir, imageBuffer.buffer, imageBuffer.ext);
       }
@@ -1259,13 +1200,11 @@ function setupIPC() {
       // 2b. Windows FileDropList fallback — reads actual Explorer-copied file paths
       const fileDropPaths = getWindowsClipboardFileDropList();
       if (fileDropPaths.length > 0) {
-        console.log('[paste:step2b] Windows FileDropList found', fileDropPaths.length, 'files');
         return copyFilesToDir(resolvedDir, fileDropPaths);
       }
 
       // 3. Try file paths and remote URLs from all clipboard formats
       const { paths: localPaths, remoteUrls: uriListRemoteUrls, debug } = getClipboardFilePaths(formats);
-      console.log('[paste:step3] local paths:', localPaths.length, 'remote URLs:', uriListRemoteUrls.length);
       if (localPaths.length > 0) {
         return copyFilesToDir(resolvedDir, localPaths);
       }
@@ -1273,14 +1212,12 @@ function setupIPC() {
       let uriListDebug: any = null;
       if (formats.includes('text/uri-list') && localPaths.length === 0 && uriListRemoteUrls.length === 0) {
         uriListDebug = { uriListPreview: debug.uriListPreview, uriListBufferLen: debug.uriListBufferLen };
-        console.log('[paste:step3a] text/uri-list present but yielded nothing -> will report at end');
       }
 
       // 4. Try downloading remote image URLs
       const allRemoteUrls = [...uriListRemoteUrls];
       if (allRemoteUrls.length === 0) {
         const htmlResult = getImageFromHtmlOrText();
-        console.log('[paste:step4] HTML check: dataURI=', !!htmlResult.buffer, 'remoteUrls=', htmlResult.remoteUrls?.length ?? 0);
         if (htmlResult.buffer) {
           return writeImageBuffer(resolvedDir, htmlResult.buffer, htmlResult.ext ?? '.png');
         }
@@ -1288,20 +1225,16 @@ function setupIPC() {
       }
       if (allRemoteUrls.length > 0) {
         const firstUrl = allRemoteUrls[0];
-        console.log('[paste:step4a] trying to download:', firstUrl);
         const dlResult = await downloadRemoteImageToDir(resolvedDir, firstUrl);
-        console.log('[paste:step4b] download result:', dlResult.success, dlResult.error);
         if (dlResult.success) return { success: true, path: dlResult.path };
         return { success: false, error: dlResult.error || 'Failed to download remote image.', formats };
       }
 
       // 5. Try plain text fallback
       const text = clipboard.readText();
-      console.log('[paste:step5] readText length:', text?.length ?? 0);
       if (text) {
         const lines = text.split(/[\n\r]+/).filter(Boolean);
         const potentialPaths = lines.map((l: string) => l.trim()).filter((p: string) => fs.existsSync(p));
-        console.log('[paste:step5a] plain text as file paths:', potentialPaths.length);
         if (potentialPaths.length > 0) {
           return copyFilesToDir(resolvedDir, potentialPaths);
         }
@@ -1310,12 +1243,10 @@ function setupIPC() {
         }
         const filePath = uniquePath(resolvedDir, 'pasted.txt');
         fs.writeFileSync(filePath, text, 'utf-8');
-        console.log('[paste:step5b] wrote pasted.txt');
         return { success: true, path: filePath };
       }
 
       // Final failure
-      console.log('=== [paste:fail] all steps exhausted');
       if (uriListDebug) {
         return {
           success: false,
@@ -1327,7 +1258,6 @@ function setupIPC() {
 
       return { success: false, error: 'No pasteable content found.', formats };
     } catch (err: any) {
-      console.error('[paste:error]', err);
       return { success: false, error: err.message };
     }
   });
@@ -1347,7 +1277,7 @@ function setupIPC() {
             fs.copyFileSync(src, dest);
           }
           copiedPaths.push(dest);
-        } catch (e) { console.log('[copy-external] failed:', src, e); }
+        } catch {}
       }
       return { success: true, count: copiedPaths.length, paths: copiedPaths, path: copiedPaths[0] };
     } catch (err: any) {
@@ -1423,30 +1353,13 @@ function setupIPC() {
       const image = clipboard.readImage();
       const html = clipboard.readHTML();
       const bufLengths: Record<string, number> = {};
-
-      console.log('=== [clipboard-debug] ===');
-      console.log('[clipboard-debug] platform:', process.platform);
-      console.log('[clipboard-debug] formats:', formats);
-      console.log('[clipboard-debug] readImage isEmpty:', image.isEmpty());
-      if (!image.isEmpty()) console.log('[clipboard-debug] readImage size:', image.getSize());
-      console.log('[clipboard-debug] readText length:', text?.length ?? 0);
-      if (text) console.log('[clipboard-debug] readText preview:', text.slice(0, 300));
-      console.log('[clipboard-debug] readHTML length:', html?.length ?? 0);
-      if (html) console.log('[clipboard-debug] readHTML preview:', html.slice(0, 300));
-
       for (const fmt of formats) {
         try {
           const buf = clipboard.readBuffer(fmt);
           const len = buf?.length ?? 0;
           bufLengths[fmt] = len;
-          console.log(`[clipboard-debug] buffer[${fmt}] length:`, len);
-          if (buf && len > 0) {
-            try { console.log(`[clipboard-debug] buffer[${fmt}] utf8:`, Buffer.from(buf).toString('utf8').slice(0, 300)); } catch {}
-            try { console.log(`[clipboard-debug] buffer[${fmt}] utf16le:`, Buffer.from(buf).toString('utf16le').slice(0, 300)); } catch {}
-          }
         } catch { bufLengths[fmt] = -1; }
       }
-      console.log('=== [/clipboard-debug] ===');
 
       return {
         platform: process.platform,
@@ -1459,6 +1372,10 @@ function setupIPC() {
     } catch {
       return { platform: process.platform, formats: [], textLength: 0, htmlLength: 0, imageIsEmpty: true, bufferLengths: {} };
     }
+  });
+
+  ipcMain.handle('fs:readClipboardText', async () => {
+    return clipboard.readText();
   });
 
   ipcMain.handle('fs:statFile', async (_event, filePath: string) => {

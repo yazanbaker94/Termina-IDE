@@ -1,7 +1,7 @@
-import React, { useRef, useEffect, useCallback, useState } from 'react';
+import React, { useRef, useEffect, useCallback, useState, useImperativeHandle, forwardRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { AlertTriangle, FilePlus, FileEdit, FileMinus, ChevronDown, ChevronRight, X } from 'lucide-react';
+import { AlertTriangle, FilePlus, FileEdit, FileMinus, ChevronDown, ChevronRight, X, ClipboardPaste, Copy } from 'lucide-react';
 import { FileChangeEvent, AgentStatus } from '../types';
 
 interface AgentPanelProps {
@@ -19,6 +19,7 @@ interface AgentPanelProps {
   onWrite: (input: string) => void;
   onChangedFileClick: (evt: FileChangeEvent) => void;
   onXtermWriteReady: (sessionId: string, writeFn: ((data: string) => void) | null) => void;
+  terminalRef?: React.RefObject<{ focus: () => void }>;
 }
 
 function changeIcon(changeType: string) {
@@ -58,6 +59,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   hasProject,
   sessionLabel,
   onRenameSession,
+  terminalRef: externalTerminalRef,
   onWrite,
   onChangedFileClick,
   onXtermWriteReady,
@@ -67,6 +69,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [changesExpanded, setChangesExpanded] = useState(false);
+  const [termMenu, setTermMenu] = useState<{ x: number; y: number } | null>(null);
   const inputLineRef = useRef('');
   const renamedRef = useRef(false);
 
@@ -100,6 +103,35 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     } catch (_) {}
   }, [sessionId]);
 
+  const focusTerminal = useCallback(() => {
+    if (terminalRef.current) terminalRef.current.focus();
+  }, []);
+
+  useEffect(() => {
+    if (externalTerminalRef) {
+      (externalTerminalRef as any).current = { focus: focusTerminal };
+    }
+  }, [externalTerminalRef, focusTerminal]);
+
+  const pasteToTerminal = useCallback(async () => {
+    let text = '';
+    try {
+      if (typeof navigator?.clipboard?.readText === 'function') {
+        text = await navigator.clipboard.readText();
+      }
+    } catch {}
+    if (!text) {
+      try { text = await window.electronAPI.readClipboardText(); } catch {}
+    }
+    if (!text) return;
+    for (const ch of text) {
+      if (ch === '\r' || ch === '\n') { inputLineRef.current = ''; }
+      else if (ch >= ' ') { inputLineRef.current += ch; }
+    }
+    onWrite(text);
+    focusTerminal();
+  }, [onWrite, focusTerminal]);
+
   const initTerminal = useCallback(() => {
     if (!containerRef.current) return;
     containerRef.current.innerHTML = '';
@@ -123,6 +155,14 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     term.loadAddon(fitAddon);
     term.open(containerRef.current);
     term.focus();
+
+    term.attachCustomKeyEventHandler((ev: KeyboardEvent) => {
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === 'v') {
+        pasteToTerminal();
+        return false;
+      }
+      return true;
+    });
 
     if (terminalBuffer) {
       term.write(terminalBuffer);
@@ -159,7 +199,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     onXtermWriteReady(sessionId, (data: string) => {
       if (terminalRef.current) terminalRef.current.write(data);
     });
-  }, [onWrite, syncResize, terminalBuffer, sessionId, sessionLabel, onRenameSession, onXtermWriteReady]);
+  }, [onWrite, syncResize, terminalBuffer, sessionId, sessionLabel, onRenameSession, onXtermWriteReady, pasteToTerminal]);
 
   const destroyTerminal = useCallback(() => {
     if (terminalRef.current) {
@@ -169,9 +209,36 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     }
   }, []);
 
-  const focusTerminal = useCallback(() => {
-    if (terminalRef.current) terminalRef.current.focus();
+  const copyTerminalSelection = useCallback(async () => {
+    if (!terminalRef.current) return;
+    const sel = terminalRef.current.getSelection();
+    if (sel) {
+      try { await navigator.clipboard.writeText(sel); } catch {}
+    }
   }, []);
+
+  const handleTerminalContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setTermMenu({ x: e.clientX, y: e.clientY });
+  }, []);
+
+  const closeTermMenu = useCallback(() => setTermMenu(null), []);
+
+  useEffect(() => {
+    if (!termMenu) return;
+    const close = () => setTermMenu(null);
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    const click = (e: MouseEvent) => {
+      const el = document.querySelector('.term-context-menu');
+      if (el && !el.contains(e.target as Node)) close();
+    };
+    document.addEventListener('keydown', esc);
+    document.addEventListener('click', click, true);
+    return () => {
+      document.removeEventListener('keydown', esc);
+      document.removeEventListener('click', click, true);
+    };
+  }, [termMenu]);
 
   useEffect(() => {
     onXtermWriteReady(sessionId, null);
@@ -259,7 +326,23 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
         </div>
       )}
 
-      <div className="agent-terminal-container" ref={containerRef} onClick={focusTerminal} />
+      <div className="agent-terminal-container"
+        ref={containerRef}
+        onClick={focusTerminal}
+        onContextMenu={handleTerminalContextMenu}
+        tabIndex={0} />
+
+      {termMenu && (
+        <div className="term-context-menu" style={{ position: 'fixed', left: termMenu.x, top: termMenu.y, zIndex: 101 }}
+          onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
+          <button className="file-context-item" onClick={async () => { closeTermMenu(); await pasteToTerminal(); }}>
+            <ClipboardPaste size={11} /><span>Paste</span>
+          </button>
+          <button className="file-context-item" onClick={async () => { closeTermMenu(); await copyTerminalSelection(); }}>
+            <Copy size={11} /><span>Copy Selection</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 };

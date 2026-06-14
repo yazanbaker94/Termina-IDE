@@ -9,14 +9,7 @@ interface ToolbarProps {
 const handleWindowControl = async (action: 'minimize' | 'maximizeToggle' | 'close', e: React.MouseEvent) => {
   e.preventDefault();
   e.stopPropagation();
-  console.log('[window-control]', action, 'clicked');
-  try {
-    const r = await window.electronAPI.windowControl(action);
-    console.log('[window-control]', action, 'result:', r);
-    if (!r.success) console.error('[window-control]', action, 'failed:', r.error);
-  } catch (err) {
-    console.error('[window-control]', action, 'error:', err);
-  }
+  try { await window.electronAPI.windowControl(action); } catch {}
 };
 
 const Toolbar: React.FC<ToolbarProps> = ({ onOpenFolder, onToggleFiles }) => {
