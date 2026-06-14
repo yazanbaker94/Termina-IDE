@@ -533,20 +533,15 @@ const App: React.FC = () => {
   }, [refreshFileTree, refreshGitStatus]);
 
   const handlePaste = useCallback(async (targetDir: string) => {
-    console.log('=== [app:paste:start] targetDir:', targetDir);
     const r = await window.electronAPI.pasteFromClipboard(targetDir);
-    console.log('[app:paste:result]', { success: r.success, error: r.error, path: r.path, paths: r.paths, count: r.count, formats: r.formats });
     if (!r.success) {
-      // Check if it's the empty text/uri-list case
       const isUriListOnly = r.formats?.length === 1 && r.formats[0] === 'text/uri-list';
       const msg = isUriListOnly
-        ? 'Windows did not expose copied file paths to this app. Use Import File or drag/drop instead.'
-        : 'Could not paste clipboard content. Use Import File or drag files into the panel.';
-      console.warn('[app:paste:fail]', r.error);
+        ? 'Windows did not expose copied file paths to this app. Use Ctrl+V or drag/drop instead.'
+        : 'Could not paste clipboard content. Use Ctrl+V or drag files into the panel.';
       alert(msg);
       return;
     }
-    console.log('[app:paste:ok] pasted to', r.path);
     await refreshFileTree();
     if (r.path) {
       const ext = r.path.split('.').pop()?.toLowerCase() ?? '';

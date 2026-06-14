@@ -327,11 +327,6 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
 
   // Context-menu Paste
   const contextMenuPaste = useCallback(async (targetDir: string) => {
-    console.log('=== [cm-paste:start] targetDir:', targetDir);
-    try {
-      const debug = await window.electronAPI.getClipboardDebug();
-      console.log('[cm-paste:debug]', { platform: debug.platform, formats: debug.formats, imageIsEmpty: debug.imageIsEmpty, textLength: debug.textLength, htmlLength: debug.htmlLength, bufferLengths: debug.bufferLengths, navClipboard: typeof navigator?.clipboard?.read === 'function' });
-    } catch {}
     try {
       if (typeof navigator?.clipboard?.read === 'function') {
         const items = await navigator.clipboard.read();
@@ -358,7 +353,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
           }
         }
       }
-    } catch (e: any) { console.log('[cm-paste:nav:error]', e.name, e.message); }
+    } catch {}
     if (onPaste) await onPaste(targetDir);
   }, [onPaste, pasteBlobToDir, onRefreshTree, onFileSelect]);
 

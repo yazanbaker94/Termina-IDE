@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useCallback } from 'react';
-import { X, RefreshCw, FolderOpen, Search, ClipboardList } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { X, RefreshCw, FolderOpen, Search } from 'lucide-react';
 import { FileNode } from '../types';
 import FileTree from './FileTree';
 
@@ -37,23 +37,11 @@ const FilesDrawer: React.FC<FilesDrawerProps> = ({
   const [filter, setFilter] = useState('');
   const filteredTree = useMemo(() => filterTree(rootTree, filter), [rootTree, filter]);
 
-  const handleClipboardDebug = useCallback(async () => {
-    try {
-      const debug = await window.electronAPI.getClipboardDebug();
-      console.log('[clipboard-debug] full:', debug);
-      const summary = `Formats: ${debug.formats.join(', ') || 'none'} | image empty: ${debug.imageIsEmpty} | text length: ${debug.textLength} | html length: ${debug.htmlLength}`;
-      alert(summary);
-    } catch (e: any) {
-      alert('Clipboard debug failed: ' + e.message);
-    }
-  }, []);
-
   return (
     <div className="files-drawer">
       <div className="files-drawer-header">
         <span className="files-drawer-title">FILES</span>
         <div className="files-drawer-actions">
-          {!!projectName && <button className="files-drawer-action-btn" onClick={handleClipboardDebug} title="Clipboard Debug"><ClipboardList size={12} /></button>}
           {!!projectName && <button className="files-drawer-action-btn" onClick={() => { onRefreshTree(); }} title="Refresh explorer"><RefreshCw size={12} /></button>}
           <button className="files-drawer-action-btn" onClick={onClose} title="Close"><X size={14} /></button>
         </div>
