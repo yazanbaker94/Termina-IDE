@@ -920,6 +920,24 @@ function setupIPC() {
     };
   });
 
+  ipcMain.handle('dialog:openFiles', async (_event, targetDir: string) => {
+    try {
+      safeResolvePath(targetDir);
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        properties: ['openFile', 'multiSelections'],
+        title: 'Import Files',
+        filters: [
+          { name: 'Media Files', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'mp4', 'mov', 'webm', 'mkv', 'mp3'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
+      if (result.canceled || !result.filePaths.length) return { canceled: true };
+      return { canceled: false, filePaths: result.filePaths };
+    } catch (err: any) {
+      return { canceled: false, filePaths: [], error: err.message };
+    }
+  });
+
   ipcMain.handle('fs:readFile', async (_event, filePath: string) => {
     try {
       const resolved = safeResolvePath(filePath);
@@ -1376,15 +1394,38 @@ function setupIPC() {
       const formats = clipboard.availableFormats('clipboard');
       const text = clipboard.readText();
       const image = clipboard.readImage();
+      const html = clipboard.readHTML();
       const bufLengths: Record<string, number> = {};
+
+      console.log('=== [clipboard-debug] ===');
+      console.log('[clipboard-debug] platform:', process.platform);
+      console.log('[clipboard-debug] formats:', formats);
+      console.log('[clipboard-debug] readImage isEmpty:', image.isEmpty());
+      if (!image.isEmpty()) console.log('[clipboard-debug] readImage size:', image.getSize());
+      console.log('[clipboard-debug] readText length:', text?.length ?? 0);
+      if (text) console.log('[clipboard-debug] readText preview:', text.slice(0, 300));
+      console.log('[clipboard-debug] readHTML length:', html?.length ?? 0);
+      if (html) console.log('[clipboard-debug] readHTML preview:', html.slice(0, 300));
+
       for (const fmt of formats) {
-        try { bufLengths[fmt] = clipboard.readBuffer(fmt)?.length ?? 0; } catch { bufLengths[fmt] = -1; }
+        try {
+          const buf = clipboard.readBuffer(fmt);
+          const len = buf?.length ?? 0;
+          bufLengths[fmt] = len;
+          console.log(`[clipboard-debug] buffer[${fmt}] length:`, len);
+          if (buf && len > 0) {
+            try { console.log(`[clipboard-debug] buffer[${fmt}] utf8:`, Buffer.from(buf).toString('utf8').slice(0, 300)); } catch {}
+            try { console.log(`[clipboard-debug] buffer[${fmt}] utf16le:`, Buffer.from(buf).toString('utf16le').slice(0, 300)); } catch {}
+          }
+        } catch { bufLengths[fmt] = -1; }
       }
+      console.log('=== [/clipboard-debug] ===');
+
       return {
         platform: process.platform,
         formats,
         textLength: text?.length ?? 0,
-        htmlLength: clipboard.readHTML()?.length ?? 0,
+        htmlLength: html?.length ?? 0,
         imageIsEmpty: image.isEmpty(),
         bufferLengths: bufLengths,
       };

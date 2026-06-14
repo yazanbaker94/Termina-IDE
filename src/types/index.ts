@@ -111,6 +111,7 @@ export interface SessionRuntimeState {
 export interface ElectronAPI {
   platform: string;
   openFolder: () => Promise<OpenFolderResult | null>;
+  openFiles: (targetDir: string) => Promise<{ canceled: boolean; filePaths?: string[]; error?: string }>;
   readFile: (filePath: string) => Promise<ReadFileResult>;
   saveFile: (filePath: string, content: string) => Promise<{ success: boolean }>;
   startAgent: (sessionId: string, cwd: string) => Promise<AgentStartResult>;

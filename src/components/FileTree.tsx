@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { ChevronRight, File, Folder, FolderOpen, FilePlus, FolderPlus, Trash2, PenLine, ExternalLink, ClipboardPaste, Copy } from 'lucide-react';
+import { ChevronRight, File, Folder, FolderOpen, FilePlus, FolderPlus, Trash2, PenLine, ExternalLink, ClipboardPaste, Copy, Upload } from 'lucide-react';
 import { FileNode } from '../types';
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svg']);
@@ -45,6 +45,7 @@ const ContextMenu: React.FC<{
         <>
           <button className="file-context-item" onClick={() => doAction('newFile')}><FilePlus size={11} /><span>New File</span></button>
           <button className="file-context-item" onClick={() => doAction('newFolder')}><FolderPlus size={11} /><span>New Folder</span></button>
+          <button className="file-context-item" onClick={() => doAction('importFiles')}><Upload size={11} /><span>Import Files...</span></button>
           <button className="file-context-item" onClick={() => doAction('paste')}>
             <ClipboardPaste size={11} /><span>Paste</span>
             <span className="file-context-item-hint">screenshots &amp; copied files</span>
@@ -279,10 +280,9 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
   const contextMenuPaste = useCallback(async (targetDir: string) => {
     console.log('=== [cm-paste:start] targetDir:', targetDir);
     
-    // Get debug info first
-    let debug: any = null;
+    // Log renderer debug
     try {
-      debug = await window.electronAPI.getClipboardDebug();
+      const debug = await window.electronAPI.getClipboardDebug();
       console.log('[cm-paste:debug]', {
         platform: debug.platform,
         formats: debug.formats,
@@ -293,17 +293,6 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
         navigatorClipboardExists: typeof navigator?.clipboard?.read === 'function',
       });
     } catch (e) { console.log('[cm-paste:debug:error]', e); }
-
-    // Early detection: only text/uri-list with nothing usable
-    if (debug) {
-      const hasOnlyTextUriList = debug.formats.length === 1 && debug.formats[0] === 'text/uri-list';
-      const allBuffersEmpty = Object.values(debug.bufferLengths ?? {}).every((v: any) => v === 0 || v === -1);
-      if (hasOnlyTextUriList && debug.imageIsEmpty && debug.textLength === 0 && debug.htmlLength === 0 && allBuffersEmpty) {
-        console.log('[cm-paste:early] clipboard has only empty text/uri-list — nothing Electron can read');
-        alert('This clipboard does not contain image data or a file path that Electron can access. Try Ctrl+V in the Files panel, drag the image file in, or copy a downloaded image file from Explorer.');
-        return;
-      }
-    }
 
     // Try navigator.clipboard.read() for image blobs
     try {
@@ -359,7 +348,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
       console.log('[cm-paste:nav:error]', e.name, e.message);
     }
 
-    // Fallback to main-process
+    // Always fallback to main-process — let it log detailed diagnostics in PowerShell
     console.log('[cm-paste:fallback] calling main-process pasteFromClipboard for', targetDir);
     if (onPaste) await onPaste(targetDir);
   }, [onPaste, pasteBlobToDir, onRefreshTree, onFileSelect]);
@@ -409,6 +398,26 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
           setEditing({ type: 'rename', path: data.path, originalName: data.name });
           break;
         }
+        case 'importFiles': {
+          const dir = targetDir || data.path;
+          if (!dir) return;
+          const result = await window.electronAPI.openFiles(dir);
+          if (result.canceled || !result.filePaths?.length) return;
+          const r = await window.electronAPI.copyExternalFiles(dir, result.filePaths);
+          if (!r.success) { alert(r.error); return; }
+          await onRefreshTree();
+          if (r.path) {
+            const ext = r.path.split('.').pop()?.toLowerCase() ?? '';
+            const imageExts = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svg']);
+            if (imageExts.has(ext)) {
+              try {
+                const asset = await window.electronAPI.getAssetDataUrl(r.path);
+                onFileSelect({ name: r.path.split(/[\\/]/).pop() ?? 'imported', path: r.path, type: 'file' });
+              } catch {}
+            }
+          }
+          break;
+        }
         case 'paste': {
           const dir = targetDir || data.path;
           if (!dir) return;
@@ -443,7 +452,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
       console.error('[file-action] error:', action, err);
       alert(`Operation failed: ${err}`);
     }
-  }, [rootPath, onRefreshTree, activeFilePath, onCloseActiveFile, onFileSelect]);
+  }, [rootPath, onRefreshTree, activeFilePath, onCloseActiveFile, onFileSelect, contextMenuPaste]);
 
   const confirmRename = useCallback(async (value: string) => {
     if (!editing?.path || !editing?.originalName) return;

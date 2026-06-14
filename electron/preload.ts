@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
+  openFiles: (targetDir: string) => ipcRenderer.invoke('dialog:openFiles', targetDir),
   readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
   saveFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:saveFile', filePath, content),
   startAgent: (sessionId: string, cwd: string) => ipcRenderer.invoke('agent:start', sessionId, cwd),
