@@ -1,17 +1,9 @@
-<!-- sup -->
-<!-- test comment -->
-<!-- yo -->
-test
 
-<!-- test comment -->
-<!-- test comment 4 -->
-<!-- test comment --># Command Code IDE
+# Command Code IDE
 
 Desktop IDE for [Command Code CLI][cc] — an Electron + React + TypeScript app that wraps the CLI in a full editor environment with file explorer, Monaco code editor, xterm.js terminal, and Git support.
 
 [cc]: https://commandcode.ai/
-
-<!-- test comment 2 -->
 
 ## Features
 
@@ -23,14 +15,11 @@ Desktop IDE for [Command Code CLI][cc] — an Electron + React + TypeScript app 
 - **Resizable Panels** — drag to resize sidebar, editor, and agent panel
 - **Dark Theme** — Catppuccin-inspired color palette
 
-<!-- test comment -->
 ## Prerequisites
 
 [Command Code CLI][cc] must be installed and available as `command-code` (or `command-code.cmd` on Windows) in your PATH.
 
 For Windows packaging, Visual Studio Build Tools with the C++ workload is required to compile native modules (node-pty).
-
-<!-- test comment 3 -->
 
 ## Setup
 
@@ -75,5 +64,3 @@ The `dev` script compiles the Electron main process, starts the Vite dev server 
 ├── package.json
 └── tsconfig*.json
 ```
-
-<!-- test comment -->

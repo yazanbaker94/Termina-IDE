@@ -101,98 +101,274 @@ function parseFileUri(uri: string): string | null {
   return null;
 }
 
-function getClipboardFilePaths(formats: string[]): string[] {
-  const paths: string[] = [];
+function classifyClipboardUri(uri: string): { kind: 'file'; path: string } | { kind: 'remote'; url: string } | null {
+  const trimmed = uri.trim();
+  if (trimmed.startsWith('file://')) {
+    const resolved = parseFileUri(trimmed);
+    if (resolved) return { kind: 'file', path: resolved };
+    return null;
+  }
+  if (trimmed.match(/^https?:\/\//i)) {
+    return { kind: 'remote', url: trimmed };
+  }
+  // Plain absolute path
+  if (trimmed.match(/^[a-zA-Z]:[\\/]/) || trimmed.startsWith('/')) {
+    try {
+      const resolved = path.resolve(decodeURIComponent(trimmed));
+      if (fs.existsSync(resolved)) return { kind: 'file', path: resolved };
+    } catch {}
+  }
+  return null;
+}
 
-  if (process.platform === 'win32') {
-    // Find the actual FileNameW format name (could be "FileNameW" or "FileName")
-    const fileFormat = formats.find((f: string) => f.includes('FileName'));
-    if (fileFormat) {
-      try {
-        const raw = clipboard.readBuffer(fileFormat);
-        if (raw && raw.length > 0) {
-          const text = Buffer.from(raw).toString('utf16le');
-          const entries = text.split('\0').filter(Boolean);
-          for (const entry of entries) {
-            const trimmed = entry.trim();
-            if (trimmed && fs.existsSync(trimmed)) {
-              paths.push(trimmed);
-            }
-          }
-        }
-      } catch (e) { console.log('[paste] file readBuffer failed:', e); }
+function parseUriList(text: string): string[] {
+  const lines = text.split(/[\n\r]+/);
+  const uris: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (trimmed === 'copy' || trimmed === 'cut') continue;
+    uris.push(trimmed);
+  }
+  return uris;
+}
+
+function readClipboardFormatText(format: string): string {
+  try {
+    const data = clipboard.read(format);
+    return data.toString();
+  } catch {
+    try {
+      const buf = clipboard.readBuffer(format);
+      return Buffer.from(buf).toString('utf8');
+    } catch {
+      return '';
     }
   }
+}
 
-  if (process.platform === 'darwin') {
-    if (formats.includes('public.file-url')) {
-      try {
-        const text = clipboard.read('public.file-url');
-        if (text) {
-          for (const line of text.toString().split(/[\n\r]+/)) {
-            const resolved = parseFileUri(line.trim());
-            if (resolved) paths.push(resolved);
-          }
-        }
-      } catch (e) { console.log('[paste] public.file-url failed:', e); }
+function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls: string[] } {
+  const localPaths: string[] = [];
+  const remoteUrls: string[] = [];
+  const seen = new Set<string>();
+
+  const addItem = (item: NonNullable<ReturnType<typeof classifyClipboardUri>>) => {
+    if (item.kind === 'file') {
+      const lower = item.path.toLowerCase();
+      if (!seen.has(lower)) { seen.add(lower); localPaths.push(item.path); }
+    } else if (item.kind === 'remote') {
+      if (!seen.has(item.url)) { seen.add(item.url); remoteUrls.push(item.url); }
     }
-    // NSFilenamesPboardType
-    const nsFormat = formats.find((f: string) => f.includes('NSFilenamesPboard') || f.includes('NSFilenames'));
-    if (nsFormat) {
-      try {
-        const raw = clipboard.readBuffer(nsFormat);
-        if (raw) {
-          // Try simple parse: extract <string>...</string> or split by newlines
-          const text = raw.toString('utf8');
-          const stringMatches = text.match(/<string>([^<]+)<\/string>/g);
-          if (stringMatches) {
-            for (const m of stringMatches) {
-              const content = m.replace(/<\/?string>/g, '');
-              const resolved = parseFileUri(content.trim());
-              if (resolved) paths.push(resolved);
-            }
-          } else {
-            // Try plain split
-            for (const line of text.split(/[\n\r\0]+/)) {
-              const resolved = parseFileUri(line.trim());
-              if (resolved) paths.push(resolved);
-            }
-          }
+  };
+
+  // FileNameW / FileName (Windows, but try on all platforms)
+  const fileFormats = formats.filter((f: string) => f.toLowerCase().includes('filename'));
+  for (const fmt of fileFormats) {
+    try {
+      const raw = clipboard.readBuffer(fmt);
+      if (raw && raw.length > 0) {
+        const text = Buffer.from(raw).toString('utf16le');
+        for (const entry of text.split('\0').filter(Boolean)) {
+          const classified = classifyClipboardUri(entry.trim());
+          if (classified) addItem(classified);
         }
-      } catch (e) { console.log('[paste] NSFilenames failed:', e); }
-    }
+      }
+    } catch (e) { console.log(`[paste] ${fmt} failed:`, e); }
   }
 
-  if (process.platform === 'linux') {
-    if (formats.includes('text/uri-list')) {
-      try {
-        const text = clipboard.read('text/uri-list');
-        if (text) {
-          for (const line of text.toString().split(/[\n\r]+/)) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#')) continue;
-            const resolved = parseFileUri(trimmed);
-            if (resolved) paths.push(resolved);
-          }
-        }
-      } catch (e) { console.log('[paste] text/uri-list failed:', e); }
-    }
-    if (formats.includes('x-special/gnome-copied-files')) {
-      try {
-        const text = clipboard.read('x-special/gnome-copied-files');
-        if (text) {
-          const lines = text.toString().split(/[\n\r]+/).filter(Boolean);
-          for (const line of lines) {
-            if (line.startsWith('copy') || line.startsWith('cut')) continue;
-            const resolved = parseFileUri(line.trim());
-            if (resolved) paths.push(resolved);
-          }
-        }
-      } catch (e) { console.log('[paste] gnome-copied-files failed:', e); }
-    }
+  // text/uri-list — all platforms
+  if (formats.includes('text/uri-list')) {
+    try {
+      const text = readClipboardFormatText('text/uri-list');
+      for (const uri of parseUriList(text)) {
+        const classified = classifyClipboardUri(uri);
+        if (classified) addItem(classified);
+      }
+    } catch (e) { console.log('[paste] text/uri-list failed:', e); }
   }
 
-  return paths;
+  // x-special/gnome-copied-files — all platforms
+  if (formats.includes('x-special/gnome-copied-files')) {
+    try {
+      const text = readClipboardFormatText('x-special/gnome-copied-files');
+      for (const uri of parseUriList(text)) {
+        const classified = classifyClipboardUri(uri);
+        if (classified) addItem(classified);
+      }
+    } catch (e) { console.log('[paste] gnome-copied-files failed:', e); }
+  }
+
+  // public.file-url — all platforms
+  if (formats.includes('public.file-url')) {
+    try {
+      const text = readClipboardFormatText('public.file-url');
+      for (const line of text.split(/[\n\r]+/).filter(Boolean)) {
+        const classified = classifyClipboardUri(line.trim());
+        if (classified) addItem(classified);
+      }
+    } catch (e) { console.log('[paste] public.file-url failed:', e); }
+  }
+
+  // public.url
+  if (formats.includes('public.url')) {
+    try {
+      const text = readClipboardFormatText('public.url');
+      for (const line of text.split(/[\n\r]+/).filter(Boolean)) {
+        const classified = classifyClipboardUri(line.trim());
+        if (classified) addItem(classified);
+      }
+    } catch (e) { console.log('[paste] public.url failed:', e); }
+  }
+
+  // NSFilenamesPboardType — macOS plist
+  const nsFormat = formats.find((f: string) => f.includes('NSFilenamesPboard') || f.includes('NSFilenames'));
+  if (nsFormat) {
+    try {
+      const raw = clipboard.readBuffer(nsFormat);
+      if (raw) {
+        const text = raw.toString('utf8');
+        const stringMatches = text.match(/<string>([^<]+)<\/string>/g);
+        if (stringMatches) {
+          for (const m of stringMatches) {
+            const content = m.replace(/<\/?string>/g, '');
+            const classified = classifyClipboardUri(content.trim());
+            if (classified) addItem(classified);
+          }
+        } else {
+          for (const line of text.split(/[\n\r\0]+/)) {
+            const classified = classifyClipboardUri(line.trim());
+            if (classified) addItem(classified);
+          }
+        }
+      }
+    } catch (e) { console.log('[paste] NSFilenames failed:', e); }
+  }
+
+  // Also scan clipboard.readText() for URIs
+  try {
+    const text = clipboard.readText();
+    if (text) {
+      // Check if it looks like URI lines
+      const urlRegex = /(?:https?|file):\/\/[^\s]+/gi;
+      const matches = text.match(urlRegex);
+      if (matches) {
+        for (const url of matches) {
+          const classified = classifyClipboardUri(url);
+          if (classified) addItem(classified);
+        }
+      }
+      // Also try plain file path lines
+      for (const line of text.split(/[\n\r]+/).filter(Boolean)) {
+        const trimmed = line.trim();
+        if (trimmed.match(/^[a-zA-Z]:[\\/]/) || trimmed.startsWith('/')) {
+          const classified = classifyClipboardUri(trimmed);
+          if (classified) addItem(classified);
+        }
+      }
+    }
+  } catch (e) { console.log('[paste] readText scan failed:', e); }
+
+  // HTML <img src="..."> and <a href="...">
+  try {
+    const html = clipboard.readHTML();
+    if (html) {
+      const srcRegex = /(?:src|href)=["']([^"']+)["']/gi;
+      let match;
+      while ((match = srcRegex.exec(html)) !== null) {
+        const classified = classifyClipboardUri(match[1]);
+        if (classified) addItem(classified);
+      }
+    }
+  } catch (e) { console.log('[paste] HTML scan failed:', e); }
+
+  return { paths: localPaths, remoteUrls };
+}
+
+async function downloadRemoteImageToDir(targetDir: string, url: string): Promise<{ success: boolean; path?: string; error?: string }> {
+  if (!url.match(/^https?:\/\//i)) return { success: false, error: 'Unsupported URL protocol.' };
+
+  return new Promise((resolve) => {
+    const proto = url.startsWith('https') ? require('https') : require('http');
+    const req = proto.get(url, { timeout: 15000, headers: { 'User-Agent': 'CommandCode-IDE/1.0' } }, (res: any) => {
+      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        const redirectUrl = res.headers.location;
+        req.destroy();
+        downloadRemoteImageToDir(targetDir, redirectUrl).then(resolve);
+        return;
+      }
+
+      const contentType = (res.headers['content-type'] || '').toLowerCase();
+      const safeImageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp', 'image/x-icon'];
+      const isImageMime = safeImageTypes.some((t) => contentType.startsWith(t));
+
+      let ext = '';
+      if (isImageMime) {
+        if (contentType.includes('png')) ext = '.png';
+        else if (contentType.includes('jpeg') || contentType.includes('jpg')) ext = '.jpg';
+        else if (contentType.includes('webp')) ext = '.webp';
+        else if (contentType.includes('gif')) ext = '.gif';
+        else if (contentType.includes('bmp')) ext = '.bmp';
+        else if (contentType.includes('icon')) ext = '.ico';
+        else ext = '.png';
+      } else {
+        // Check URL extension as fallback
+        const urlPath = url.split('?')[0].split('#')[0];
+        const urlExt = path.extname(urlPath).toLowerCase();
+        const safeExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.ico'];
+        if (safeExts.includes(urlExt)) {
+          ext = urlExt;
+        } else {
+          req.destroy();
+          resolve({ success: false, error: 'Clipboard contains a URL that does not appear to be an image.' });
+          return;
+        }
+      }
+
+      const chunks: Buffer[] = [];
+      let totalSize = 0;
+      const maxSize = 20 * 1024 * 1024; // 20 MB
+
+      res.on('data', (chunk: Buffer) => {
+        totalSize += chunk.length;
+        if (totalSize > maxSize) {
+          req.destroy();
+          resolve({ success: false, error: 'Remote image exceeds 20 MB limit.' });
+          return;
+        }
+        chunks.push(chunk);
+      });
+
+      res.on('end', () => {
+        try {
+          const buffer = Buffer.concat(chunks);
+          if (buffer.length === 0) {
+            resolve({ success: false, error: 'Downloaded image is empty.' });
+            return;
+          }
+          const urlPath = url.split('?')[0].split('#')[0];
+          let baseName = path.basename(urlPath) || 'pasted-image';
+          if (!path.extname(baseName)) baseName += ext;
+          const result = writeImageBuffer(targetDir, buffer, path.extname(baseName) || ext, baseName.replace(/\.[^.]+$/, ''));
+          resolve(result);
+        } catch (e: any) {
+          resolve({ success: false, error: e.message });
+        }
+      });
+
+      res.on('error', (e: any) => {
+        resolve({ success: false, error: `Download failed: ${e.message}` });
+      });
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ success: false, error: 'Download timed out.' });
+    });
+
+    req.on('error', (e: any) => {
+      resolve({ success: false, error: `Download failed: ${e.message}` });
+    });
+  });
 }
 
 function getClipboardImageBuffer(formats: string[]): { buffer: Buffer; ext: string } | null {
@@ -220,7 +396,7 @@ function getClipboardImageBuffer(formats: string[]): { buffer: Buffer; ext: stri
   return null;
 }
 
-function getImageFromHtmlOrText(): { buffer?: Buffer; ext?: string; error?: string } {
+function getImageFromHtmlOrText(): { buffer?: Buffer; ext?: string; error?: string; remoteUrls?: string[] } {
   try {
     const html = clipboard.readHTML();
     const text = clipboard.readText();
@@ -237,9 +413,14 @@ function getImageFromHtmlOrText(): { buffer?: Buffer; ext?: string; error?: stri
       if (buffer.length > 0) return { buffer, ext };
     }
 
-    // Check for remote image URLs (http://...)
-    if (contentToSearch.match(/<img[^>]+src=["']https?:\/\//i)) {
-      return { error: 'Clipboard contains a remote image URL, but remote image download is not supported yet.' };
+    // Collect remote image URLs for later download attempt
+    const remoteUrls: string[] = [];
+    const imgSrcMatches = contentToSearch.match(/<img[^>]+src=["'](https?:\/\/[^"']+)["']/gi);
+    if (imgSrcMatches) {
+      for (const m of imgSrcMatches) {
+        const urlMatch = m.match(/src=["'](https?:\/\/[^"']+)["']/i);
+        if (urlMatch) remoteUrls.push(urlMatch[1]);
+      }
     }
 
     // Check for file:// image src
@@ -254,6 +435,8 @@ function getImageFromHtmlOrText(): { buffer?: Buffer; ext?: string; error?: stri
         } catch {}
       }
     }
+
+    if (remoteUrls.length > 0) return { remoteUrls };
   } catch (e) { console.log('[paste] HTML/text parse failed:', e); }
 
   return {};
@@ -959,31 +1142,44 @@ function setupIPC() {
       const formats = clipboard.availableFormats('clipboard');
       logClipboardDebug(formats);
 
-      // 1. Try copied file paths (explorer/finder file copy)
-      const filePaths = getClipboardFilePaths(formats);
-      if (filePaths.length > 0) {
-        console.log('[paste] found file paths:', filePaths);
-        return copyFilesToDir(resolvedDir, filePaths);
+      // 1. Try file paths and remote URLs from all clipboard formats
+      const { paths: localPaths, remoteUrls: uriListRemoteUrls } = getClipboardFilePaths(formats);
+      if (localPaths.length > 0) {
+        console.log('[paste] found file paths:', localPaths);
+        return copyFilesToDir(resolvedDir, localPaths);
       }
 
-      // 2. Try native bitmap image (screenshot / browser copy image)
+      // 2. Try downloading remote image URLs (from text/uri-list, HTML, etc.)
+      const allRemoteUrls = [...uriListRemoteUrls];
+      // Also check HTML for remote image URLs
+      if (allRemoteUrls.length === 0) {
+        const htmlResult = getImageFromHtmlOrText();
+        if (htmlResult.buffer) {
+          console.log('[paste] found data URI image');
+          return writeImageBuffer(resolvedDir, htmlResult.buffer, htmlResult.ext ?? '.png');
+        }
+        if (htmlResult.remoteUrls?.length) {
+          allRemoteUrls.push(...htmlResult.remoteUrls);
+        }
+      }
+      if (allRemoteUrls.length > 0) {
+        const firstUrl = allRemoteUrls[0];
+        console.log('[paste] trying to download remote image:', firstUrl);
+        const dlResult = await downloadRemoteImageToDir(resolvedDir, firstUrl);
+        if (dlResult.success) return { success: true, path: dlResult.path };
+        return { success: false, error: dlResult.error || 'Failed to download remote image.', formats };
+      }
+
+      // 3. Try native bitmap image (screenshot / browser copy image)
       const nativeResult = saveNativeImage(resolvedDir);
       if (nativeResult.success) return nativeResult;
 
-      // 3. Try raw image buffers (e.g. Ctrl+C image in some apps)
+      // 4. Try raw image buffers
       const imageBuffer = getClipboardImageBuffer(formats);
       if (imageBuffer) {
         console.log('[paste] found image buffer, ext:', imageBuffer.ext);
         return writeImageBuffer(resolvedDir, imageBuffer.buffer, imageBuffer.ext);
       }
-
-      // 4. Try data: URI from HTML or text
-      const htmlResult = getImageFromHtmlOrText();
-      if (htmlResult.buffer) {
-        console.log('[paste] found data URI image');
-        return writeImageBuffer(resolvedDir, htmlResult.buffer, htmlResult.ext ?? '.png');
-      }
-      if (htmlResult.error) return { success: false, error: htmlResult.error, formats };
 
       // 5. Try plain text fallback
       const text = clipboard.readText();
@@ -994,12 +1190,16 @@ function setupIPC() {
         if (potentialPaths.length > 0) {
           return copyFilesToDir(resolvedDir, potentialPaths);
         }
+        // If text is just a URL, don't create pasted.txt — user likely wanted to paste an image
+        if (text.trim().match(/^https?:\/\//)) {
+          return { success: false, error: 'Clipboard contains a URL, but it is not an image.', formats };
+        }
         const filePath = uniquePath(resolvedDir, 'pasted.txt');
         fs.writeFileSync(filePath, text, 'utf-8');
         return { success: true, path: filePath };
       }
 
-      return { success: false, error: `No pasteable content found. Clipboard formats: ${formats.join(', ')}`, formats };
+      return { success: false, error: 'No pasteable content found.', formats };
     } catch (err: any) {
       return { success: false, error: err.message };
     }
