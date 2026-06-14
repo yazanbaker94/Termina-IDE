@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { ChevronRight, File, Folder, FolderOpen, FilePlus, FolderPlus, Trash2, PenLine, ExternalLink, ClipboardPaste, Copy } from 'lucide-react';
+import { ChevronRight, File, Folder, FolderOpen, FilePlus, FolderPlus, Trash2, PenLine, ExternalLink, ClipboardPaste, Copy, AtSign } from 'lucide-react';
 import { FileNode } from '../types';
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svg']);
@@ -11,6 +11,7 @@ interface FileTreeProps {
   onRefreshTree: () => Promise<void> | void;
   onCloseActiveFile?: () => void;
   onPaste?: (targetDir: string) => Promise<void>;
+  onAddToContext?: (node: FileNode) => void;
 }
 
 interface ContextMenuData {
@@ -43,6 +44,7 @@ const ContextMenu: React.FC<{
       onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
       {(data.kind === 'root' || data.kind === 'folder') && (
         <>
+          <button className="file-context-item" onClick={() => doAction('addToContext')}><AtSign size={11} /><span>Add to Context</span></button>
           <button className="file-context-item" onClick={() => doAction('newFile')}><FilePlus size={11} /><span>New File</span></button>
           <button className="file-context-item" onClick={() => doAction('newFolder')}><FolderPlus size={11} /><span>New Folder</span></button>
           <button className="file-context-item" onClick={() => doAction('paste')}>
@@ -51,6 +53,9 @@ const ContextMenu: React.FC<{
           </button>
           <div className="file-context-separator" />
         </>
+      )}
+      {(data.kind === 'file') && (
+        <button className="file-context-item" onClick={() => doAction('addToContext')}><AtSign size={11} /><span>Add to Context</span></button>
       )}
       {(data.kind === 'folder' || data.kind === 'file') && (
         <button className="file-context-item" onClick={() => doAction('rename')}><PenLine size={11} /><span>Rename</span></button>
@@ -80,9 +85,10 @@ interface TreeNodeRowProps {
   onSelect: (node: FileNode) => void;
   onFileSelect: (node: FileNode) => void;
   onOpenContextMenu: (kind: 'file' | 'folder', node: FileNode, x: number, y: number) => void;
+  onAddToContext: (node: FileNode) => void;
 }
 
-const TreeNodeRow: React.FC<TreeNodeRowProps> = React.memo(({ node, depth, activeFilePath, selectedPath, onSelect, onFileSelect, onOpenContextMenu }) => {
+const TreeNodeRow: React.FC<TreeNodeRowProps> = React.memo(({ node, depth, activeFilePath, selectedPath, onSelect, onFileSelect, onOpenContextMenu, onAddToContext }) => {
   const [expanded, setExpanded] = useState(depth < 1);
   const isDir = node.type === 'directory';
   const hasChildren = !!node.children?.length;
@@ -121,6 +127,9 @@ const TreeNodeRow: React.FC<TreeNodeRowProps> = React.memo(({ node, depth, activ
       >
         <span className="file-icon">{getFileIcon(node.name, {})}</span>
         <span className="file-name">{node.name}</span>
+        <span className="file-row-action" onClick={(e) => { e.stopPropagation(); onAddToContext(node); }} title="Add to Context">
+          <AtSign size={11} />
+        </span>
       </button>
     );
   }
@@ -143,6 +152,9 @@ const TreeNodeRow: React.FC<TreeNodeRowProps> = React.memo(({ node, depth, activ
           {expanded ? <FolderOpen size={14} /> : <Folder size={14} />}
         </span>
         <span className="file-name">{node.name}</span>
+        <span className="file-row-action" onClick={(e) => { e.stopPropagation(); onAddToContext(node); }} title="Add to Context">
+          <AtSign size={11} />
+        </span>
       </button>
       {expanded && hasChildren && (
         <div>
@@ -156,6 +168,7 @@ const TreeNodeRow: React.FC<TreeNodeRowProps> = React.memo(({ node, depth, activ
               onSelect={onSelect}
               onFileSelect={onFileSelect}
               onOpenContextMenu={onOpenContextMenu}
+              onAddToContext={onAddToContext}
             />
           ))}
         </div>
@@ -213,7 +226,7 @@ const EditingRow: React.FC<EditingRowProps> = ({ type, depth, defaultValue, plac
   );
 };
 
-const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect, onRefreshTree, onCloseActiveFile, onPaste }) => {
+const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect, onRefreshTree, onCloseActiveFile, onPaste, onAddToContext }) => {
   const [menu, setMenu] = useState<ContextMenuData | null>(null);
   const [editing, setEditing] = useState<EditingState | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -381,11 +394,16 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
   }, []);
 
   const handleAction = useCallback(async (action: string, data: ContextMenuData) => {
-    console.log('[file-action]', action, data.kind, data.path);
     const targetDir = data.kind === 'folder' ? data.path : rootPath;
 
     try {
       switch (action) {
+        case 'addToContext': {
+          if (!onAddToContext) return;
+          const node: FileNode = { name: data.name, path: data.path, type: data.kind === 'folder' ? 'directory' : 'file' };
+          onAddToContext(node);
+          break;
+        }
         case 'newFile': {
           const dir = targetDir;
           if (!dir) return;
@@ -434,11 +452,10 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
           break;
         }
       }
-    } catch (err) {
-      console.error('[file-action] error:', action, err);
-      alert(`Operation failed: ${err}`);
+    } catch (err: any) {
+      alert(`Operation failed: ${err?.message ?? err}`);
     }
-  }, [rootPath, onRefreshTree, activeFilePath, onCloseActiveFile, onFileSelect, contextMenuPaste, pasting, selectedPath]);
+  }, [rootPath, onRefreshTree, activeFilePath, onCloseActiveFile, onFileSelect, contextMenuPaste, pasting, selectedPath, onAddToContext]);
 
   const confirmRename = useCallback(async (value: string) => {
     if (!editing?.path || !editing?.originalName) return;
@@ -534,6 +551,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
             onSelect={handleSelect}
             onFileSelect={onFileSelect}
             onOpenContextMenu={handleNodeContext}
+            onAddToContext={(node) => onAddToContext?.(node)}
           />
         );
       })}

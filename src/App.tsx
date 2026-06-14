@@ -59,6 +59,7 @@ const App: React.FC = () => {
   const agentListenersAttachedRef = useRef(false);
   const agentHasRunRef = useRef(false);
   const xtermWriteRef = useRef<{ sessionId: string | null; write: ((data: string) => void) | null }>({ sessionId: null, write: null });
+  const terminalFocusRef = useRef<{ focus: () => void } | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingChangedPathsRef = useRef<Set<string>>(new Set());
   const pendingDeletedPathsRef = useRef<Set<string>>(new Set());
@@ -501,6 +502,36 @@ const App: React.FC = () => {
     setSessions((prev) => prev.map((s) => s.id === sessionId ? { ...s, label: newLabel, renamedFromPrompt: true, updatedAt: Date.now() } : s));
   }, []);
 
+  const handleAddToContext = useCallback(async (node: FileNode) => {
+    if (!activeSessionId || !rootPath) {
+      alert('Start a chat first.');
+      return;
+    }
+    if (!activeRuntime || activeRuntime.agentStatus !== 'running') {
+      alert('Start a chat first.');
+      return;
+    }
+    const normalizedRoot = rootPath.replace(/\\/g, '/').replace(/\/$/, '');
+    const normalizedNode = node.path.replace(/\\/g, '/');
+    let relative = normalizedNode;
+    if (normalizedNode.toLowerCase().startsWith(normalizedRoot.toLowerCase() + '/')) {
+      relative = normalizedNode.slice(normalizedRoot.length + 1);
+    } else if (normalizedNode.toLowerCase() === normalizedRoot.toLowerCase()) {
+      relative = '';
+    }
+    if (!relative) relative = '.';
+    const needsQuote = relative.includes(' ');
+    const isDir = node.type === 'directory';
+    const formatted = needsQuote
+      ? ` @"${relative}${isDir ? '/' : ''}" `
+      : ` @${relative}${isDir ? '/' : ''} `;
+    if (xtermWriteRef.current.write && xtermWriteRef.current.sessionId === activeSessionId) {
+      xtermWriteRef.current.write(formatted);
+    }
+    await handleWriteAgent(activeSessionId, formatted);
+    terminalFocusRef.current?.focus();
+  }, [activeSessionId, rootPath, activeRuntime, handleWriteAgent]);
+
   const handleXtermWriteReady = useCallback((sessionId: string, writeFn: ((data: string) => void) | null) => {
     xtermWriteRef.current = { sessionId, write: writeFn };
   }, []);
@@ -609,7 +640,8 @@ const App: React.FC = () => {
                 onRenameSession={handleRenameSession}
                 onWrite={(input) => handleWriteAgent(activeSessionId, input)}
                 onChangedFileClick={handleChangedFileClick}
-                onXtermWriteReady={handleXtermWriteReady} />
+                onXtermWriteReady={handleXtermWriteReady}
+                terminalRef={terminalFocusRef} />
             </div>
           )}
 
@@ -621,7 +653,8 @@ const App: React.FC = () => {
                     rootTree={rootTree} activeFilePath={activeFile?.path || ''}
                     onClose={() => setFilesDrawerVisible(false)} onFileSelect={handleFileSelect}
                     onRefreshTree={handleRefreshTree} onOpenFolder={handleOpenFolder}
-                    onCloseActiveFile={handleCloseFile} onPaste={handlePaste} />
+                    onCloseActiveFile={handleCloseFile} onPaste={handlePaste}
+                    onAddToContext={handleAddToContext} />
                 </div>
               )}
 
