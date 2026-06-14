@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback, useState, useImperativeHandle, forwardRef } from 'react';
+import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { AlertTriangle, FilePlus, FileEdit, FileMinus, ChevronDown, ChevronRight, X, ClipboardPaste, Copy } from 'lucide-react';
@@ -47,6 +47,21 @@ function buildChatTitle(prompt: string): string {
   return title || '';
 }
 
+function normalizeTerminalPaste(text: string): string {
+  let s = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  if (!s.includes('\n') && s.endsWith('\n')) {
+    return s.slice(0, -1);
+  }
+  if (s.endsWith('\n')) {
+    const lines = s.split('\n');
+    const nonEmpty = lines.filter((l) => l.length > 0);
+    if (nonEmpty.length === 1) {
+      return nonEmpty[0];
+    }
+  }
+  return s;
+}
+
 const AgentPanel: React.FC<AgentPanelProps> = ({
   sessionId,
   status,
@@ -72,6 +87,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   const [termMenu, setTermMenu] = useState<{ x: number; y: number } | null>(null);
   const inputLineRef = useRef('');
   const renamedRef = useRef(false);
+  const lastPasteRef = useRef<{ text: string; at: number } | null>(null);
 
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
@@ -113,7 +129,56 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     }
   }, [externalTerminalRef, focusTerminal]);
 
-  const pasteToTerminal = useCallback(async () => {
+  const recordTerminalInputForTitle = useCallback((data: string) => {
+    for (const ch of data) {
+      if (ch === '\r' || ch === '\n') {
+        const line = inputLineRef.current;
+        inputLineRef.current = '';
+        if (line.length >= 8 && !renamedRef.current && sessionLabel && /^Chat \d+$/.test(sessionLabel)) {
+          const title = buildChatTitle(line);
+          if (title.length > 0 && title !== 'Chat') {
+            renamedRef.current = true;
+            onRenameSession(sessionId, title);
+          }
+        }
+      } else if (ch === '\x7f') {
+        if (inputLineRef.current.length > 0) {
+          inputLineRef.current = inputLineRef.current.slice(0, -1);
+        }
+      } else if (ch >= ' ') {
+        inputLineRef.current += ch;
+      }
+    }
+  }, [sessionId, sessionLabel, onRenameSession]);
+
+  const sendTerminalInput = useCallback((data: string, source: string) => {
+    if (!data) return;
+
+    if (data.length > 1) {
+      const now = Date.now();
+      const last = lastPasteRef.current;
+      if (last && last.text === data && now - last.at < 500) {
+        return;
+      }
+      lastPasteRef.current = { text: data, at: now };
+    }
+
+    recordTerminalInputForTitle(data);
+    onWrite(data);
+  }, [onWrite, recordTerminalInputForTitle]);
+
+  const handleTerminalPaste = useCallback((e: React.ClipboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const text = e.clipboardData.getData('text/plain');
+    if (!text) return;
+    const normalized = normalizeTerminalPaste(text);
+    if (!normalized) return;
+    sendTerminalInput(normalized, 'dom-paste');
+    focusTerminal();
+  }, [sendTerminalInput, focusTerminal]);
+
+  const contextMenuPaste = useCallback(async () => {
     let text = '';
     try {
       if (typeof navigator?.clipboard?.readText === 'function') {
@@ -124,13 +189,11 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
       try { text = await window.electronAPI.readClipboardText(); } catch {}
     }
     if (!text) return;
-    for (const ch of text) {
-      if (ch === '\r' || ch === '\n') { inputLineRef.current = ''; }
-      else if (ch >= ' ') { inputLineRef.current += ch; }
-    }
-    onWrite(text);
+    const normalized = normalizeTerminalPaste(text);
+    if (!normalized) return;
+    sendTerminalInput(normalized, 'context-menu-paste');
     focusTerminal();
-  }, [onWrite, focusTerminal]);
+  }, [sendTerminalInput, focusTerminal]);
 
   const initTerminal = useCallback(() => {
     if (!containerRef.current) return;
@@ -156,14 +219,6 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     term.open(containerRef.current);
     term.focus();
 
-    term.attachCustomKeyEventHandler((ev: KeyboardEvent) => {
-      if ((ev.ctrlKey || ev.metaKey) && ev.key === 'v') {
-        pasteToTerminal();
-        return false;
-      }
-      return true;
-    });
-
     if (terminalBuffer) {
       term.write(terminalBuffer);
     }
@@ -171,26 +226,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     setTimeout(() => syncResize(), 50);
 
     term.onData((data: string) => {
-      for (const ch of data) {
-        if (ch === '\r') {
-          const line = inputLineRef.current;
-          inputLineRef.current = '';
-          if (line.length >= 8 && !renamedRef.current && sessionLabel && /^Chat \d+$/.test(sessionLabel)) {
-            const title = buildChatTitle(line);
-            if (title.length > 0 && title !== 'Chat') {
-              renamedRef.current = true;
-              onRenameSession(sessionId, title);
-            }
-          }
-        } else if (ch === '\x7f') {
-          if (inputLineRef.current.length > 0) {
-            inputLineRef.current = inputLineRef.current.slice(0, -1);
-          }
-        } else if (ch >= ' ') {
-          inputLineRef.current += ch;
-        }
-      }
-      onWrite(data);
+      sendTerminalInput(data, 'xterm-data');
     });
 
     terminalRef.current = term;
@@ -199,7 +235,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     onXtermWriteReady(sessionId, (data: string) => {
       if (terminalRef.current) terminalRef.current.write(data);
     });
-  }, [onWrite, syncResize, terminalBuffer, sessionId, sessionLabel, onRenameSession, onXtermWriteReady, pasteToTerminal]);
+  }, [onXtermWriteReady, sessionId, syncResize, terminalBuffer, sendTerminalInput]);
 
   const destroyTerminal = useCallback(() => {
     if (terminalRef.current) {
@@ -213,7 +249,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     if (!terminalRef.current) return;
     const sel = terminalRef.current.getSelection();
     if (sel) {
-      try { await navigator.clipboard.writeText(sel); } catch {}
+      try { await window.electronAPI.writeClipboardText(sel); } catch {}
     }
   }, []);
 
@@ -330,12 +366,13 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
         ref={containerRef}
         onClick={focusTerminal}
         onContextMenu={handleTerminalContextMenu}
+        onPasteCapture={handleTerminalPaste}
         tabIndex={0} />
 
       {termMenu && (
         <div className="term-context-menu" style={{ position: 'fixed', left: termMenu.x, top: termMenu.y, zIndex: 101 }}
           onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
-          <button className="file-context-item" onClick={async () => { closeTermMenu(); await pasteToTerminal(); }}>
+          <button className="file-context-item" onClick={async () => { closeTermMenu(); await contextMenuPaste(); }}>
             <ClipboardPaste size={11} /><span>Paste</span>
           </button>
           <button className="file-context-item" onClick={async () => { closeTermMenu(); await copyTerminalSelection(); }}>

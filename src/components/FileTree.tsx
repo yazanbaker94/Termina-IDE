@@ -242,12 +242,11 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
     setSelectedKind(node.type === 'directory' ? 'folder' : 'file');
   }, []);
 
-  // Escape key — close menu or clear selection
+  // Delete key handler
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     const tag = (e.target as HTMLElement).tagName;
     const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable;
 
-    // Delete key
     if (e.key === 'Delete' && !isInput && selectedPath && selectedKind) {
       e.preventDefault();
       const name = selectedPath.split(/[\\/]/).pop() || selectedPath;
@@ -265,18 +264,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
       }).catch((err) => { alert('Delete failed: ' + err); });
       return;
     }
-
-    // Ctrl+V paste via selection
-    if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !isInput) {
-      e.preventDefault();
-      let targetDir = rootPath;
-      if (selectedKind === 'folder' && selectedPath) { targetDir = selectedPath; }
-      else if (selectedKind === 'file' && selectedPath) { targetDir = selectedPath.replace(/[\\/][^\\/]*$/, ''); }
-      if (!targetDir || !onPaste || pasting) return;
-      setPasting(true);
-      onPaste(targetDir).finally(() => setPasting(false));
-    }
-  }, [selectedPath, selectedKind, rootPath, onPaste, pasting, activeFilePath, onCloseActiveFile, onRefreshTree]);
+  }, [selectedPath, selectedKind, activeFilePath, onCloseActiveFile, onRefreshTree]);
 
   const getPasteTargetDir = useCallback((): string | null => {
     if (menu && (menu.kind === 'folder' || menu.kind === 'root')) return menu.path;
@@ -443,7 +431,17 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
           break;
         }
         case 'copyRelativePath': {
-          try { await navigator.clipboard.writeText(data.path); } catch {}
+          const root = rootPath.replace(/\\/g, '/').replace(/\/$/, '');
+          const target = data.path.replace(/\\/g, '/');
+          let relative = '.';
+          if (target.toLowerCase() === root.toLowerCase()) {
+            relative = '.';
+          } else if (target.toLowerCase().startsWith(root.toLowerCase() + '/')) {
+            relative = target.slice(root.length + 1);
+          } else {
+            relative = target;
+          }
+          try { await window.electronAPI.writeClipboardText(relative); } catch {}
           break;
         }
         case 'reveal': {

@@ -525,9 +525,6 @@ const App: React.FC = () => {
     const formatted = needsQuote
       ? ` @"${relative}${isDir ? '/' : ''}" `
       : ` @${relative}${isDir ? '/' : ''} `;
-    if (xtermWriteRef.current.write && xtermWriteRef.current.sessionId === activeSessionId) {
-      xtermWriteRef.current.write(formatted);
-    }
     await handleWriteAgent(activeSessionId, formatted);
     terminalFocusRef.current?.focus();
   }, [activeSessionId, rootPath, activeRuntime, handleWriteAgent]);

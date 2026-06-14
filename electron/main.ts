@@ -1378,6 +1378,11 @@ function setupIPC() {
     return clipboard.readText();
   });
 
+  ipcMain.handle('clipboard:writeText', async (_event, text: string) => {
+    clipboard.writeText(String(text ?? ''));
+    return { success: true };
+  });
+
   ipcMain.handle('fs:statFile', async (_event, filePath: string) => {
     try {
       const resolved = safeResolvePath(filePath);

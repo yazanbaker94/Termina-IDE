@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAssetDataUrl: (filePath: string) => ipcRenderer.invoke('fs:getAssetDataUrl', filePath),
   getClipboardDebug: () => ipcRenderer.invoke('fs:getClipboardDebug'),
   readClipboardText: () => ipcRenderer.invoke('fs:readClipboardText'),
+  writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
   writePastedBuffer: (args: { targetDir: string; filename?: string; mimeType?: string; bytes: number[] }) => ipcRenderer.invoke('fs:writePastedBuffer', args),
   statFile: (filePath: string) => ipcRenderer.invoke('fs:statFile', filePath),
 });
