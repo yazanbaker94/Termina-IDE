@@ -1,12 +1,12 @@
 {
-  "name": "command-code-ide",
+  "name": "termina",
   "version": "0.1.0",
-  "description": "Desktop IDE for Command Code CLI",
-  "author": "Command Code",
+  "description": "Desktop IDE for Termina",
+  "author": "Termina",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/commandcode/command-code-ide"
+    "url": "https://github.com/yazanbaker94/Termina"
   },
   "main": "dist-electron/main.js",
   "scripts": {
@@ -21,8 +21,8 @@
     "dist": "npm run build && electron-builder --win"
   },
   "build": {
-    "appId": "ai.commandcode.ide",
-    "productName": "Command Code IDE",
+    "appId": "ai.termina.app",
+    "productName": "Termina",
     "directories": {
       "output": "release"
     },

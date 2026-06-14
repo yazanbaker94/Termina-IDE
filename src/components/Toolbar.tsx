@@ -16,7 +16,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ onOpenFolder, onToggleFiles }) => {
   return (
     <div className="toolbar">
       <div className="toolbar-left">
-        <span className="toolbar-brand">Command Code</span>
+        <span className="toolbar-brand">Termina</span>
       </div>
       <div className="toolbar-center">
         <button className="toolbar-btn" onClick={onOpenFolder} title="Open Folder">

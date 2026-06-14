@@ -1,11 +1,8 @@
-
-# Unofficial Command Code IDE - Cli + IDE = Clide
+# Termina
 
 <a href="https://buymeacoffee.com/yazanbaker" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 
-Desktop IDE for [Command Code CLI][cc] — an Electron + React + TypeScript app that wraps the CLI in a full editor environment with file explorer, Monaco code editor, xterm.js terminal, and Git support.
-
-[cc]: https://commandcode.ai/
+Desktop IDE — an Electron + React + TypeScript app with an embedded terminal, file explorer, Monaco code editor, and Git support.
 
 ![Screenshot](pasted-image-20260614-191738.png)
 
@@ -13,7 +10,7 @@ Desktop IDE for [Command Code CLI][cc] — an Electron + React + TypeScript app 
 
 - **File Explorer** — browse project folders, open files for editing
 - **Monaco Editor** — full IntelliSense code editing with syntax highlighting
-- **Agent Terminal** — embedded xterm.js terminal running Command Code CLI via node-pty
+- **Agent Terminal** — embedded xterm.js terminal via node-pty
 - **Git Integration** — staged/unstaged file list, stage/unstage/commit with status bar feedback
 - **Clipboard Paste** — paste screenshots, images from clipboard, or files into the project. On Windows, falls back to Explorer's FileDropList via PowerShell when Electron's clipboard API misses Explorer-copied files.
 - **Diff Viewer** — view before/after file diffs from agent changes, revert individual files
@@ -22,7 +19,7 @@ Desktop IDE for [Command Code CLI][cc] — an Electron + React + TypeScript app 
 
 ## Prerequisites
 
-[Command Code CLI][cc] must be installed and available as `command-code` (or `command-code.cmd` on Windows) in your PATH.
+The `command-code` CLI must be installed and available as `command-code` (or `command-code.cmd` on Windows) in your PATH.
 
 For Windows packaging, Visual Studio Build Tools with the C++ workload is required to compile native modules (node-pty).
 
@@ -53,8 +50,8 @@ The `dev` script compiles the Electron main process, starts the Vite dev server 
 │   └── preload.ts           # Context bridge (window.electronAPI)
 ├── src/
 │   ├── components/
-│   │   ├── Toolbar.tsx      # Run/stop agent, open folder
-│   │   ├── Sidebar.tsx      # File tree explorer
+│   │   ├── Toolbar.tsx      # App toolbar with window controls
+│   │   ├── FileTree.tsx     # File tree explorer
 │   │   ├── Editor.tsx       # Monaco code editor
 │   │   ├── AgentPanel.tsx   # Terminal, git status, changed files
 │   │   ├── DiffViewer.tsx   # Before/after file diff viewer

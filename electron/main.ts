@@ -329,7 +329,7 @@ async function downloadRemoteImageToDir(targetDir: string, url: string): Promise
 
   return new Promise((resolve) => {
     const proto = url.startsWith('https') ? require('https') : require('http');
-    const req = proto.get(url, { timeout: 15000, headers: { 'User-Agent': 'CommandCode-IDE/1.0' } }, (res: any) => {
+    const req = proto.get(url, { timeout: 15000, headers: { 'User-Agent': 'Termina/1.0' } }, (res: any) => {
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         const redirectUrl = res.headers.location;
         req.destroy();
@@ -740,7 +740,7 @@ function startAgent(sessionId: string, cwd: string): { success: boolean; error?:
   const cmdInfo = resolveCommandCode();
 
   if (!cmdInfo) {
-    return { success: false, error: 'Command Code CLI not found. Install it and make sure command-code is in your PATH.' };
+    return { success: false, error: 'Termina CLI not found. Install it and make sure command-code is in your PATH.' };
   }
 
   let shellCmd: string;
@@ -1250,7 +1250,7 @@ function setupIPC() {
       if (uriListDebug) {
         return {
           success: false,
-          error: 'Clipboard has text/uri-list but CommandCode-IDE could not parse it. Try pressing Ctrl+V in the Files panel instead.',
+          error: 'Clipboard has text/uri-list but Termina could not parse it. Try pressing Ctrl+V in the Files panel instead.',
           formats,
           debug: uriListDebug,
         };
@@ -1400,7 +1400,7 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    title: 'Command Code IDE',
+    title: 'Termina',
     backgroundColor: '#1e1e2e',
     titleBarStyle: 'hidden',
     webPreferences: {

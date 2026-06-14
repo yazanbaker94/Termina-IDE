@@ -11,7 +11,7 @@
 - Bottom status bar with project, file, language, save status, and git branch
 
 ### Agent Terminal
-- Embedded xterm.js terminal running Command Code CLI via node-pty
+- Embedded xterm.js terminal via node-pty
 - Start, stop, and restart agent from toolbar
 - Auto-resize terminal on window/panel resize
 
@@ -34,5 +34,5 @@
 - Native node-pty module rebuild support (npmRebuild + asarUnpack)
 
 ### Known Requirements
-- Command Code CLI must be installed and on PATH
+- The `command-code` CLI must be installed and on PATH
 - Windows packaging requires Visual Studio Build Tools with C++ workload
