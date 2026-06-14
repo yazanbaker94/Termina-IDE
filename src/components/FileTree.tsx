@@ -208,25 +208,25 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
   const rootPath = tree?.path ?? '';
   const fileTreeRef = useRef<HTMLDivElement>(null);
 
-  // Ctrl+V paste handler — paste into parent dir of active file, or root
-  const handleKeyDown = useCallback(async (e: React.KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return;
-      e.preventDefault();
-      const targetDir = getPasteTargetDir();
-      if (!targetDir || !onPaste) return;
-      await onPaste(targetDir);
-    }
-  }, [rootPath, activeFilePath, onPaste]);
-
   const getPasteTargetDir = useCallback((): string | null => {
     if (menu && (menu.kind === 'folder' || menu.kind === 'root')) return menu.path;
     if (activeFilePath) return activeFilePath.replace(/[\\/][^\\/]*$/, '');
     return rootPath || null;
   }, [menu, activeFilePath, rootPath]);
 
-  // DOM paste fallback — handles browser-level clipboardData (blobs/files/real image data)
+  // Shared paste logic — works for both Ctrl+V DOM paste and context-menu Paste
+  const pasteBlobToDir = useCallback(async (targetDir: string, blob: Blob, filename?: string) => {
+    const arrBuf = await blob.arrayBuffer();
+    const bytes = Array.from(new Uint8Array(arrBuf));
+    const r = await window.electronAPI.writePastedBuffer({ targetDir, filename, mimeType: blob.type, bytes });
+    if (!r.success) { alert(r.error); return; }
+    await onRefreshTree();
+    if (r.path) {
+      onFileSelect({ name: r.path.split(/[\\/]/).pop() ?? 'pasted', path: r.path, type: 'file' });
+    }
+  }, [onRefreshTree, onFileSelect]);
+
+  // DOM paste handler (Ctrl+V) — fires naturally, NOT intercepted
   const handlePasteEvent = useCallback(async (e: React.ClipboardEvent) => {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return;
@@ -237,25 +237,17 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
     const items = Array.from(e.clipboardData?.items ?? []);
     const files = Array.from(e.clipboardData?.files ?? []);
 
-    // Priority 1: File/blob with image mime
+    // Priority 1: image/blob items
     for (const item of items) {
-      if (item.kind === 'file' && item.type.match(/^image\/(png|jpeg|gif|webp|bmp)/)) {
+      if (item.kind === 'file' && item.type.match(/^image\//)) {
         const blob = item.getAsFile();
         if (!blob) continue;
-        const arrBuf = await blob.arrayBuffer();
-        const bytes = Array.from(new Uint8Array(arrBuf));
-        const r = await window.electronAPI.writePastedBuffer({ targetDir, filename: blob.name || undefined, mimeType: blob.type, bytes });
-        if (!r.success) { alert(r.error); return; }
-        await onRefreshTree();
-        if (r.path) {
-          const ext = r.path.split('.').pop()?.toLowerCase() ?? '';
-          onFileSelect({ name: r.path.split(/[\\/]/).pop() ?? 'pasted', path: r.path, type: 'file' });
-        }
+        await pasteBlobToDir(targetDir, blob, blob.name);
         return;
       }
     }
 
-    // Priority 2: File from drag/clipboard with OS path
+    // Priority 2: files with OS paths (copied from Explorer)
     if (files.length > 0) {
       const sourcePaths: string[] = [];
       for (const f of files) {
@@ -268,24 +260,37 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
         else { await onRefreshTree(); }
         return;
       }
-    }
-
-    // Priority 3: text/uri-list or plain text from paste event
-    const uriListText = e.clipboardData.getData('text/uri-list');
-    const plainText = e.clipboardData.getData('text/plain');
-    if (uriListText || plainText) {
-      const text = uriListText || plainText;
-      const lines = text.split(/[\n\r]+/).filter(Boolean);
-      const urls = lines.filter((l) => l.match(/^(https?|file):\/\//i));
-      if (urls.length > 0) {
-        alert('This paste contains URLs. Use the context menu Paste or try again with an image file copied to clipboard.');
+      // Files exist but have no OS path — try reading blobs
+      for (const f of files) {
+        if (f.type.match(/^image\//) || !f.type) continue;
+        await pasteBlobToDir(targetDir, new Blob([await f.arrayBuffer()], { type: f.type }), f.name);
         return;
       }
     }
 
-    // Fallback: try main-process pasteFromClipboard
+    // Priority 3: main-process fallback for text-only clipboard
     if (onPaste) await onPaste(targetDir);
-  }, [onPaste, getPasteTargetDir, onRefreshTree, onFileSelect]);
+  }, [onPaste, getPasteTargetDir, pasteBlobToDir, onRefreshTree]);
+
+  // Context-menu Paste — no DOM event, try navigator.clipboard API then main-process
+  const contextMenuPaste = useCallback(async (targetDir: string) => {
+    // Try navigator.clipboard.read() for image blobs
+    try {
+      const clipboardItems = await navigator.clipboard.read();
+      for (const item of clipboardItems) {
+        for (const type of item.types) {
+          if (type.match(/^image\//)) {
+            const blob = await item.getType(type);
+            await pasteBlobToDir(targetDir, blob);
+            return;
+          }
+        }
+      }
+    } catch { /* navigator.clipboard.read() not available or denied */ }
+
+    // Fallback to main-process
+    if (onPaste) await onPaste(targetDir);
+  }, [onPaste, pasteBlobToDir]);
 
   // Close menu on Escape, scroll, outside click
   useEffect(() => {
@@ -335,18 +340,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
         case 'paste': {
           const dir = targetDir || data.path;
           if (!dir) return;
-          const r = await window.electronAPI.pasteFromClipboard(dir);
-          if (!r.success) {
-            const msg = r.error ?? 'Paste failed.';
-            const formats = r.formats?.length ? `\nClipboard formats: ${r.formats.join(', ')}` : '';
-            alert(msg + formats);
-            return;
-          }
-          await onRefreshTree();
-          if (r.path) {
-            const ext = r.path.split('.').pop()?.toLowerCase() ?? '';
-            onFileSelect({ name: r.path.split(/[\\/]/).pop() ?? 'pasted', path: r.path, type: IMAGE_EXTS.has(ext) || !ext ? 'file' : 'file' });
-          }
+          await contextMenuPaste(dir);
           break;
         }
         case 'delete': {
@@ -445,7 +439,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
   }
 
   return (
-    <div ref={fileTreeRef} className="file-list" tabIndex={0} onKeyDown={handleKeyDown} onPaste={handlePasteEvent}
+    <div ref={fileTreeRef} className="file-list" onPaste={handlePasteEvent}
       onContextMenu={handleRootContext} onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
       {editing?.type === 'createFile' || editing?.type === 'createFolder' ? (
         <EditingRow

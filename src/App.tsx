@@ -535,9 +535,9 @@ const App: React.FC = () => {
   const handlePaste = useCallback(async (targetDir: string) => {
     const r = await window.electronAPI.pasteFromClipboard(targetDir);
     if (!r.success) {
-      const msg = r.error ?? 'Paste failed.';
-      const formats = r.formats?.length ? `\nClipboard formats: ${r.formats.join(', ')}` : '';
-      alert(msg + formats);
+      const msg = 'Could not paste clipboard content. Try dragging the file into the Files panel or using Ctrl+V while the panel is focused.';
+      console.warn('[paste] main-process failed:', r.error, r.formats);
+      alert(msg);
       return;
     }
     await refreshFileTree();
