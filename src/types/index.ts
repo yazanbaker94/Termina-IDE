@@ -141,4 +141,6 @@ export interface ElectronAPI {
   copyExternalFiles: (targetDir: string, sourcePaths: string[]) => Promise<{ success: boolean; error?: string; count?: number }>;
   getAssetDataUrl: (filePath: string) => Promise<{ dataUrl: string; mime: string }>;
   getClipboardDebug: () => Promise<{ platform: string; formats: string[]; textLength: number; htmlLength: number; imageIsEmpty: boolean; bufferLengths: Record<string, number> }>;
+  writePastedBuffer: (args: { targetDir: string; filename?: string; mimeType?: string; bytes: number[] }) => Promise<{ success: boolean; error?: string; path?: string; paths?: string[]; count?: number; items?: { path: string; name: string; type: 'file' | 'directory' }[] }>;
+  statFile: (filePath: string) => Promise<{ exists: boolean; type?: 'file' | 'directory'; mtimeMs?: number; size?: number }>;
 }

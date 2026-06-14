@@ -1113,6 +1113,16 @@ function setupIPC() {
     }
   });
 
+  ipcMain.handle('fs:statFile', async (_event, filePath: string) => {
+    try {
+      const resolved = safeResolvePath(filePath);
+      const stat = fs.statSync(resolved);
+      return { exists: true, type: stat.isDirectory() ? 'directory' as const : 'file' as const, mtimeMs: stat.mtimeMs, size: stat.size };
+    } catch {
+      return { exists: false };
+    }
+  });
+
   ipcMain.handle('fs:createFolder', async (_event, parentDir: string, name: string) => {
     try {
       const resolved = safeResolvePath(path.join(parentDir, name));
@@ -1176,28 +1186,21 @@ function setupIPC() {
         return copyFilesToDir(resolvedDir, localPaths);
       }
 
-      // 2a. If text/uri-list was present but empty, give specific error
+      // Track text/uri-list failure for end-of-chain reporting (but don't abort yet)
+      let uriListDebug: any = null;
       if (formats.includes('text/uri-list') && localPaths.length === 0 && uriListRemoteUrls.length === 0) {
-        return {
-          success: false,
-          error: 'Clipboard has text/uri-list but CommandCode-IDE could not extract any usable URI from it.',
-          formats,
-          debug: { uriListPreview: debug.uriListPreview, uriListBufferLen: debug.uriListBufferLen },
-        };
+        uriListDebug = { uriListPreview: debug.uriListPreview, uriListBufferLen: debug.uriListBufferLen };
       }
 
-      // 2b. Try downloading remote image URLs
+      // 2. Try downloading remote image URLs
       const allRemoteUrls = [...uriListRemoteUrls];
-      // Also check HTML for remote image URLs
       if (allRemoteUrls.length === 0) {
         const htmlResult = getImageFromHtmlOrText();
         if (htmlResult.buffer) {
           console.log('[paste] found data URI image');
           return writeImageBuffer(resolvedDir, htmlResult.buffer, htmlResult.ext ?? '.png');
         }
-        if (htmlResult.remoteUrls?.length) {
-          allRemoteUrls.push(...htmlResult.remoteUrls);
-        }
+        if (htmlResult.remoteUrls?.length) allRemoteUrls.push(...htmlResult.remoteUrls);
       }
       if (allRemoteUrls.length > 0) {
         const firstUrl = allRemoteUrls[0];
@@ -1232,6 +1235,16 @@ function setupIPC() {
         const filePath = uniquePath(resolvedDir, 'pasted.txt');
         fs.writeFileSync(filePath, text, 'utf-8');
         return { success: true, path: filePath };
+      }
+
+      // All methods failed — report text/uri-list info if that was the only format
+      if (uriListDebug) {
+        return {
+          success: false,
+          error: 'Clipboard has text/uri-list but CommandCode-IDE could not parse it. Try pressing Ctrl+V in the Files panel instead.',
+          formats,
+          debug: uriListDebug,
+        };
       }
 
       return { success: false, error: 'No pasteable content found.', formats };
@@ -1274,6 +1287,53 @@ function setupIPC() {
     }
   });
 
+  ipcMain.handle('fs:writePastedBuffer', async (_event, args: { targetDir: string; filename?: string; mimeType?: string; bytes: number[] }) => {
+    try {
+      const resolvedDir = safeResolvePath(args.targetDir);
+      const MAX_SIZE = 20 * 1024 * 1024; // 20 MB
+      if (!args.bytes || args.bytes.length === 0 || args.bytes.length > MAX_SIZE) {
+        return { success: false, error: 'Invalid or too large paste buffer.' };
+      }
+
+      const buffer = Buffer.from(args.bytes);
+      if (buffer.length === 0) return { success: false, error: 'Empty paste buffer.' };
+
+      // Determine extension from mimeType or filename
+      let ext = '.png'; // default
+      if (args.mimeType) {
+        if (args.mimeType.includes('png')) ext = '.png';
+        else if (args.mimeType.includes('jpeg') || args.mimeType.includes('jpg')) ext = '.jpg';
+        else if (args.mimeType.includes('webp')) ext = '.webp';
+        else if (args.mimeType.includes('gif')) ext = '.gif';
+        else if (args.mimeType.includes('bmp')) ext = '.bmp';
+        else if (args.mimeType.includes('icon')) ext = '.ico';
+      }
+      if (args.filename) {
+        const fext = path.extname(args.filename).toLowerCase();
+        if (['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.ico', '.svg'].includes(fext)) ext = fext;
+      }
+
+      const now = new Date();
+      const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+      const baseName = args.filename ? path.basename(args.filename, path.extname(args.filename)) : `pasted-image-${stamp}`;
+      // Sanitize filename
+      const safeBase = baseName.replace(/[<>:"/\\|?*]/g, '_').slice(0, 100);
+      const dest = uniquePath(resolvedDir, safeBase + ext);
+      fs.writeFileSync(dest, buffer);
+
+      const nodeName = path.basename(dest);
+      return {
+        success: true,
+        path: dest,
+        paths: [dest],
+        count: 1,
+        items: [{ path: dest, name: nodeName, type: 'file' as const }],
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
   ipcMain.handle('fs:getAssetDataUrl', async (_event, filePath: string) => {
     try {
       const resolved = safeResolvePath(filePath);
@@ -1307,6 +1367,16 @@ function setupIPC() {
       };
     } catch {
       return { platform: process.platform, formats: [], textLength: 0, htmlLength: 0, imageIsEmpty: true, bufferLengths: {} };
+    }
+  });
+
+  ipcMain.handle('fs:statFile', async (_event, filePath: string) => {
+    try {
+      const resolved = safeResolvePath(filePath);
+      const stat = fs.statSync(resolved);
+      return { exists: true, type: stat.isDirectory() ? 'directory' as const : 'file' as const, mtimeMs: stat.mtimeMs, size: stat.size };
+    } catch {
+      return { exists: false };
     }
   });
 }
