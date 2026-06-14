@@ -4,7 +4,7 @@
 
 Desktop IDE — an Electron + React + TypeScript app with an embedded terminal, file explorer, Monaco code editor, and Git support.
 
-![Screenshot](pasted-image-20260614-191738.png)
+![Screenshot](image.png)
 
 ## Features
 
