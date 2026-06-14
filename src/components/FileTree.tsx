@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { ChevronRight, File, Folder, FolderOpen, FilePlus, FolderPlus, Trash2, PenLine, ExternalLink, ClipboardPaste, Copy, Upload } from 'lucide-react';
+import { ChevronRight, File, Folder, FolderOpen, FilePlus, FolderPlus, Trash2, PenLine, ExternalLink, ClipboardPaste, Copy } from 'lucide-react';
 import { FileNode } from '../types';
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svg']);
@@ -22,10 +22,10 @@ interface ContextMenuData {
 
 interface EditingState {
   type: 'rename' | 'createFile' | 'createFolder';
-  path?: string;        // existing path for rename
-  originalName?: string; // for rename
-  parentDir?: string;    // for create
-  tempId?: string;       // for create
+  path?: string;
+  originalName?: string;
+  parentDir?: string;
+  tempId?: string;
 }
 
 const ContextMenu: React.FC<{
@@ -45,7 +45,6 @@ const ContextMenu: React.FC<{
         <>
           <button className="file-context-item" onClick={() => doAction('newFile')}><FilePlus size={11} /><span>New File</span></button>
           <button className="file-context-item" onClick={() => doAction('newFolder')}><FolderPlus size={11} /><span>New Folder</span></button>
-          <button className="file-context-item" onClick={() => doAction('importFiles')}><Upload size={11} /><span>Import Files...</span></button>
           <button className="file-context-item" onClick={() => doAction('paste')}>
             <ClipboardPaste size={11} /><span>Paste</span>
             <span className="file-context-item-hint">screenshots &amp; clipboard data</span>
@@ -77,21 +76,37 @@ interface TreeNodeRowProps {
   node: FileNode;
   depth: number;
   activeFilePath: string;
+  selectedPath: string | null;
+  onSelect: (node: FileNode) => void;
   onFileSelect: (node: FileNode) => void;
   onOpenContextMenu: (kind: 'file' | 'folder', node: FileNode, x: number, y: number) => void;
 }
 
-const TreeNodeRow: React.FC<TreeNodeRowProps> = React.memo(({ node, depth, activeFilePath, onFileSelect, onOpenContextMenu }) => {
+const TreeNodeRow: React.FC<TreeNodeRowProps> = React.memo(({ node, depth, activeFilePath, selectedPath, onSelect, onFileSelect, onOpenContextMenu }) => {
   const [expanded, setExpanded] = useState(depth < 1);
   const isDir = node.type === 'directory';
   const hasChildren = !!node.children?.length;
   const isActive = activeFilePath === node.path;
+  const isSelected = selectedPath === node.path;
+
+  const handleClick = (e: React.MouseEvent) => {
+    onSelect(node);
+    if (!isDir) { onFileSelect(node); }
+    else if (hasChildren) { setExpanded(!expanded); }
+  };
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    onSelect(node);
     onOpenContextMenu(isDir ? 'folder' : 'file', node, e.clientX, e.clientY);
   };
+
+  const cls = [
+    isDir ? 'tree-folder' : 'file-item',
+    isActive ? 'active' : '',
+    isSelected ? 'selected' : '',
+  ].filter(Boolean).join(' ');
 
   if (!isDir) {
     return (
@@ -99,9 +114,9 @@ const TreeNodeRow: React.FC<TreeNodeRowProps> = React.memo(({ node, depth, activ
         data-tree-row="true"
         data-path={node.path}
         data-kind="file"
-        className={`file-item ${isActive ? 'active' : ''}`}
+        className={cls}
         style={{ paddingLeft: 8 + depth * 16 }}
-        onClick={() => onFileSelect(node)}
+        onClick={handleClick}
         onContextMenu={handleContextMenu}
       >
         <span className="file-icon">{getFileIcon(node.name, {})}</span>
@@ -116,9 +131,9 @@ const TreeNodeRow: React.FC<TreeNodeRowProps> = React.memo(({ node, depth, activ
         data-tree-row="true"
         data-path={node.path}
         data-kind="folder"
-        className={`tree-folder ${isActive ? 'active' : ''}`}
+        className={cls}
         style={{ paddingLeft: 8 + depth * 16 }}
-        onClick={() => hasChildren && setExpanded(!expanded)}
+        onClick={handleClick}
         onContextMenu={handleContextMenu}
       >
         <span className="tree-chevron" style={{ transform: expanded ? 'rotate(90deg)' : undefined }}>
@@ -137,6 +152,8 @@ const TreeNodeRow: React.FC<TreeNodeRowProps> = React.memo(({ node, depth, activ
               node={child}
               depth={depth + 1}
               activeFilePath={activeFilePath}
+              selectedPath={selectedPath}
+              onSelect={onSelect}
               onFileSelect={onFileSelect}
               onOpenContextMenu={onOpenContextMenu}
             />
@@ -172,11 +189,7 @@ const EditingRow: React.FC<EditingRowProps> = ({ type, depth, defaultValue, plac
     const val = inputRef.current?.value.trim() ?? '';
     if (!val) { setError('Name cannot be empty'); return; }
     if (val.includes('/') || val.includes('\\')) { setError('Name cannot contain / or \\'); return; }
-    try {
-      await onConfirm(val);
-    } catch (err: any) {
-      setError(err?.message ?? 'Operation failed');
-    }
+    try { await onConfirm(val); } catch (err: any) { setError(err?.message ?? 'Operation failed'); }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -191,14 +204,9 @@ const EditingRow: React.FC<EditingRowProps> = ({ type, depth, defaultValue, plac
     <div className="file-item editing" style={{ paddingLeft: 8 + depth * 16 }}>
       <span className="file-icon">{icon}</span>
       <div className="file-edit-inline">
-        <input
-          ref={inputRef}
-          className={`file-edit-input ${error ? 'file-edit-input-error' : ''}`}
-          defaultValue={defaultValue}
-          placeholder={placeholder}
-          onKeyDown={handleKeyDown}
-          onBlur={() => onCancel()}
-        />
+        <input ref={inputRef} className={`file-edit-input ${error ? 'file-edit-input-error' : ''}`}
+          defaultValue={defaultValue} placeholder={placeholder}
+          onKeyDown={handleKeyDown} onBlur={() => onCancel()} />
         {error && <span className="file-edit-error">{error}</span>}
       </div>
     </div>
@@ -208,148 +216,149 @@ const EditingRow: React.FC<EditingRowProps> = ({ type, depth, defaultValue, plac
 const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect, onRefreshTree, onCloseActiveFile, onPaste }) => {
   const [menu, setMenu] = useState<ContextMenuData | null>(null);
   const [editing, setEditing] = useState<EditingState | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedKind, setSelectedKind] = useState<'file' | 'folder' | null>(null);
+  const [pasting, setPasting] = useState(false);
   const closeMenu = useCallback(() => setMenu(null), []);
   const rootPath = tree?.path ?? '';
   const fileTreeRef = useRef<HTMLDivElement>(null);
 
+  // Selection tracking
+  const handleSelect = useCallback((node: FileNode) => {
+    setSelectedPath(node.path);
+    setSelectedKind(node.type === 'directory' ? 'folder' : 'file');
+  }, []);
+
+  // Escape key — close menu or clear selection
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const tag = (e.target as HTMLElement).tagName;
+    const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable;
+
+    // Delete key
+    if (e.key === 'Delete' && !isInput && selectedPath && selectedKind) {
+      e.preventDefault();
+      const name = selectedPath.split(/[\\/]/).pop() || selectedPath;
+      const msg = selectedKind === 'folder'
+        ? `Delete folder "${name}" and all its contents? This cannot be undone.`
+        : `Delete "${name}"?`;
+      if (!window.confirm(msg)) return;
+      if (activeFilePath && (activeFilePath === selectedPath || activeFilePath.startsWith(selectedPath + '/'))) {
+        onCloseActiveFile?.();
+      }
+      window.electronAPI.deletePath(selectedPath).then((r) => {
+        if (!r.success) alert(r.error);
+        setSelectedPath(null); setSelectedKind(null);
+        onRefreshTree();
+      }).catch((err) => { alert('Delete failed: ' + err); });
+      return;
+    }
+
+    // Ctrl+V paste via selection
+    if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !isInput) {
+      e.preventDefault();
+      let targetDir = rootPath;
+      if (selectedKind === 'folder' && selectedPath) { targetDir = selectedPath; }
+      else if (selectedKind === 'file' && selectedPath) { targetDir = selectedPath.replace(/[\\/][^\\/]*$/, ''); }
+      if (!targetDir || !onPaste || pasting) return;
+      setPasting(true);
+      onPaste(targetDir).finally(() => setPasting(false));
+    }
+  }, [selectedPath, selectedKind, rootPath, onPaste, pasting, activeFilePath, onCloseActiveFile, onRefreshTree]);
+
   const getPasteTargetDir = useCallback((): string | null => {
     if (menu && (menu.kind === 'folder' || menu.kind === 'root')) return menu.path;
-    if (activeFilePath) return activeFilePath.replace(/[\\/][^\\/]*$/, '');
+    if (selectedKind === 'folder' && selectedPath) return selectedPath;
+    if (selectedKind === 'file' && selectedPath) return selectedPath.replace(/[\\/][^\\/]*$/, '');
     return rootPath || null;
-  }, [menu, activeFilePath, rootPath]);
+  }, [menu, selectedKind, selectedPath, rootPath]);
 
-  // Shared paste logic — works for both Ctrl+V DOM paste and context-menu Paste
   const pasteBlobToDir = useCallback(async (targetDir: string, blob: Blob, filename?: string) => {
     const arrBuf = await blob.arrayBuffer();
     const bytes = Array.from(new Uint8Array(arrBuf));
     const r = await window.electronAPI.writePastedBuffer({ targetDir, filename, mimeType: blob.type, bytes });
     if (!r.success) { alert(r.error); return; }
     await onRefreshTree();
-    if (r.path) {
-      onFileSelect({ name: r.path.split(/[\\/]/).pop() ?? 'pasted', path: r.path, type: 'file' });
-    }
+    if (r.path) { onFileSelect({ name: r.path.split(/[\\/]/).pop() ?? 'pasted', path: r.path, type: 'file' }); }
   }, [onRefreshTree, onFileSelect]);
 
-  // DOM paste handler (Ctrl+V) — fires naturally, NOT intercepted
+  // Ctrl+V onPaste DOM handler — fires naturally
   const handlePasteEvent = useCallback(async (e: React.ClipboardEvent) => {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return;
     e.preventDefault();
     const targetDir = getPasteTargetDir();
-    if (!targetDir) return;
+    if (!targetDir || pasting) return;
+    setPasting(true);
 
-    const items = Array.from(e.clipboardData?.items ?? []);
-    const files = Array.from(e.clipboardData?.files ?? []);
+    try {
+      const items = Array.from(e.clipboardData?.items ?? []);
+      const files = Array.from(e.clipboardData?.files ?? []);
 
-    // Priority 1: image/blob items
-    for (const item of items) {
-      if (item.kind === 'file' && item.type.match(/^image\//)) {
-        const blob = item.getAsFile();
-        if (!blob) continue;
-        await pasteBlobToDir(targetDir, blob, blob.name);
-        return;
+      for (const item of items) {
+        if (item.kind === 'file' && item.type.match(/^image\//)) {
+          const blob = item.getAsFile();
+          if (blob) { await pasteBlobToDir(targetDir, blob, blob.name); setPasting(false); return; }
+        }
       }
-    }
 
-    // Priority 2: files with OS paths (copied from Explorer)
-    if (files.length > 0) {
-      const sourcePaths: string[] = [];
-      for (const f of files) {
-        const anyFile = f as any;
-        if (anyFile.path) sourcePaths.push(anyFile.path);
+      if (files.length > 0) {
+        const sourcePaths: string[] = [];
+        for (const f of files) {
+          const anyFile = f as any;
+          if (anyFile.path) sourcePaths.push(anyFile.path);
+        }
+        if (sourcePaths.length > 0) {
+          const r = await window.electronAPI.copyExternalFiles(targetDir, sourcePaths);
+          if (!r.success) alert(r.error);
+          else { await onRefreshTree(); }
+          setPasting(false); return;
+        }
+        for (const f of files) {
+          if (f.type.match(/^image\//)) {
+            await pasteBlobToDir(targetDir, f, f.name);
+            setPasting(false); return;
+          }
+        }
       }
-      if (sourcePaths.length > 0) {
-        const r = await window.electronAPI.copyExternalFiles(targetDir, sourcePaths);
-        if (!r.success) alert(r.error);
-        else { await onRefreshTree(); }
-        return;
-      }
-      // Files exist but have no OS path — try reading blobs
-      for (const f of files) {
-        if (f.type.match(/^image\//) || !f.type) continue;
-        await pasteBlobToDir(targetDir, new Blob([await f.arrayBuffer()], { type: f.type }), f.name);
-        return;
-      }
-    }
 
-    // Priority 3: main-process fallback for text-only clipboard
-    if (onPaste) await onPaste(targetDir);
-  }, [onPaste, getPasteTargetDir, pasteBlobToDir, onRefreshTree]);
+      if (onPaste) await onPaste(targetDir);
+    } finally { setPasting(false); }
+  }, [onPaste, getPasteTargetDir, pasteBlobToDir, onRefreshTree, pasting]);
 
-  // Context-menu Paste — no DOM event, try navigator.clipboard API then main-process
+  // Context-menu Paste
   const contextMenuPaste = useCallback(async (targetDir: string) => {
     console.log('=== [cm-paste:start] targetDir:', targetDir);
-    
-    // Log renderer debug
     try {
       const debug = await window.electronAPI.getClipboardDebug();
-      console.log('[cm-paste:debug]', {
-        platform: debug.platform,
-        formats: debug.formats,
-        imageIsEmpty: debug.imageIsEmpty,
-        textLength: debug.textLength,
-        htmlLength: debug.htmlLength,
-        bufferLengths: debug.bufferLengths,
-        navigatorClipboardExists: typeof navigator?.clipboard?.read === 'function',
-      });
-    } catch (e) { console.log('[cm-paste:debug:error]', e); }
-
-    // Try navigator.clipboard.read() for image blobs
+      console.log('[cm-paste:debug]', { platform: debug.platform, formats: debug.formats, imageIsEmpty: debug.imageIsEmpty, textLength: debug.textLength, htmlLength: debug.htmlLength, bufferLengths: debug.bufferLengths, navClipboard: typeof navigator?.clipboard?.read === 'function' });
+    } catch {}
     try {
       if (typeof navigator?.clipboard?.read === 'function') {
-        console.log('[cm-paste:nav] attempting navigator.clipboard.read()');
-        const clipboardItems = await navigator.clipboard.read();
-        console.log('[cm-paste:nav] items count:', clipboardItems.length);
-        for (let i = 0; i < clipboardItems.length; i++) {
-          const item = clipboardItems[i];
-          console.log(`[cm-paste:nav] item[${i}] types:`, item.types);
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
           for (const type of item.types) {
-            if (type.startsWith('image/')) {
-              const blob = await item.getType(type);
-              console.log(`[cm-paste:nav] image blob type=${type} size=${blob.size}`);
-              await pasteBlobToDir(targetDir, blob);
-              return;
-            }
+            if (type.startsWith('image/')) { const blob = await item.getType(type); await pasteBlobToDir(targetDir, blob); return; }
             if (type === 'text/html') {
               const text = await (await item.getType(type)).text();
-              console.log('[cm-paste:nav] html length:', text.length, 'preview:', text.slice(0, 200));
               const match = text.match(/<img[^>]+src=["']([^"']+)["']/i);
               if (match) {
                 const src = match[1];
-                console.log('[cm-paste:nav] img src:', src.slice(0, 200));
                 if (src.startsWith('data:image/')) {
                   const parts = src.split(',');
                   if (parts[1]) {
                     const ext = src.includes('image/png') ? '.png' : src.includes('image/jpeg') ? '.jpg' : '.png';
                     const bytes = Array.from(new Uint8Array(atob(parts[1]).split('').map(c => c.charCodeAt(0))));
                     const r = await window.electronAPI.writePastedBuffer({ targetDir, mimeType: `image/${ext.slice(1)}`, bytes });
-                    console.log('[cm-paste:nav] data:image write result:', r.success);
                     if (r.success) { await onRefreshTree(); if (r.path) onFileSelect({ name: r.path.split(/[\\/]/).pop() ?? 'pasted', path: r.path, type: 'file' }); return; }
                   }
                 }
-                if (src.startsWith('blob:')) {
-                  console.log('[cm-paste:nav] blob: URL detected — not supported');
-                  alert('This app cannot paste private browser blob URLs. Use Ctrl+V after copying the image itself, or drag/download the image file.');
-                  return;
-                }
+                if (src.startsWith('blob:')) { alert('This app cannot paste private browser blob URLs. Use Ctrl+V after copying the image itself, or drag/download the image file.'); return; }
               }
-            }
-            if (type === 'text/plain' || type === 'text/uri-list') {
-              const text = await (await item.getType(type)).text();
-              console.log(`[cm-paste:nav] ${type} length:`, text.length, 'preview:', text.slice(0, 200));
             }
           }
         }
-        console.log('[cm-paste:nav] no usable image found in navigator.clipboard');
-      } else {
-        console.log('[cm-paste:nav] navigator.clipboard.read not available');
       }
-    } catch (e: any) {
-      console.log('[cm-paste:nav:error]', e.name, e.message);
-    }
-
-    // Always fallback to main-process — let it log detailed diagnostics in PowerShell
-    console.log('[cm-paste:fallback] calling main-process pasteFromClipboard for', targetDir);
+    } catch (e: any) { console.log('[cm-paste:nav:error]', e.name, e.message); }
     if (onPaste) await onPaste(targetDir);
   }, [onPaste, pasteBlobToDir, onRefreshTree, onFileSelect]);
 
@@ -398,30 +407,11 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
           setEditing({ type: 'rename', path: data.path, originalName: data.name });
           break;
         }
-        case 'importFiles': {
-          const dir = targetDir || data.path;
-          if (!dir) return;
-          const result = await window.electronAPI.openFiles(dir);
-          if (result.canceled || !result.filePaths?.length) return;
-          const r = await window.electronAPI.copyExternalFiles(dir, result.filePaths);
-          if (!r.success) { alert(r.error); return; }
-          await onRefreshTree();
-          if (r.path) {
-            const ext = r.path.split('.').pop()?.toLowerCase() ?? '';
-            const imageExts = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svg']);
-            if (imageExts.has(ext)) {
-              try {
-                const asset = await window.electronAPI.getAssetDataUrl(r.path);
-                onFileSelect({ name: r.path.split(/[\\/]/).pop() ?? 'imported', path: r.path, type: 'file' });
-              } catch {}
-            }
-          }
-          break;
-        }
         case 'paste': {
           const dir = targetDir || data.path;
-          if (!dir) return;
-          await contextMenuPaste(dir);
+          if (!dir || pasting) return;
+          setPasting(true);
+          try { await contextMenuPaste(dir); } finally { setPasting(false); }
           break;
         }
         case 'delete': {
@@ -435,6 +425,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
           }
           const r = await window.electronAPI.deletePath(data.path);
           if (!r.success) alert(r.error);
+          if (selectedPath === data.path) { setSelectedPath(null); setSelectedKind(null); }
           await onRefreshTree();
           break;
         }
@@ -452,7 +443,7 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
       console.error('[file-action] error:', action, err);
       alert(`Operation failed: ${err}`);
     }
-  }, [rootPath, onRefreshTree, activeFilePath, onCloseActiveFile, onFileSelect, contextMenuPaste]);
+  }, [rootPath, onRefreshTree, activeFilePath, onCloseActiveFile, onFileSelect, contextMenuPaste, pasting, selectedPath]);
 
   const confirmRename = useCallback(async (value: string) => {
     if (!editing?.path || !editing?.originalName) return;
@@ -482,8 +473,9 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
   const handleRootContext = (e: React.MouseEvent) => {
     e.preventDefault();
     const row = (e.target as HTMLElement).closest('[data-tree-row="true"]');
-    if (row) return; // child handles it
+    if (row) return;
     if (!rootPath) return;
+    setSelectedPath(null); setSelectedKind(null);
     openMenu('root', rootPath, e.clientX, e.clientY);
   };
 
@@ -499,7 +491,6 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
       if (f.path) sourcePaths.push(f.path);
     }
     if (sourcePaths.length === 0) return;
-    // Determine target: root or hovered folder
     let target = rootPath;
     const row = (e.target as HTMLElement).closest('[data-tree-row="true"][data-kind="folder"]');
     if (row) target = row.getAttribute('data-path') || rootPath;
@@ -511,46 +502,41 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
 
   if (!tree || !tree.children) {
     return (
-      <div ref={fileTreeRef} className="tree-empty" onContextMenu={handleRootContext} onPaste={handlePasteEvent}
+      <div ref={fileTreeRef} className="tree-empty" tabIndex={0} onKeyDown={handleKeyDown}
+        onContextMenu={handleRootContext} onPaste={handlePasteEvent}
         onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
         <span className="tree-empty-text">Empty folder</span>
+        {pasting && <span className="file-status-text">Pasting...</span>}
         {menu && <ContextMenu data={menu} onClose={closeMenu} onAction={handleAction} />}
       </div>
     );
   }
 
   return (
-    <div ref={fileTreeRef} className="file-list" onPaste={handlePasteEvent}
+    <div ref={fileTreeRef} className="file-list" tabIndex={0} onKeyDown={handleKeyDown} onPaste={handlePasteEvent}
       onContextMenu={handleRootContext} onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
+      {pasting && <div className="file-status-bar">Pasting...</div>}
       {editing?.type === 'createFile' || editing?.type === 'createFolder' ? (
         <EditingRow
-          type={editing.type}
-          depth={0}
+          type={editing.type} depth={0}
           placeholder={editing.type === 'createFile' ? 'filename.ext' : 'folder-name'}
-          onConfirm={confirmCreate}
-          onCancel={() => setEditing(null)}
+          onConfirm={confirmCreate} onCancel={() => setEditing(null)}
         />
       ) : null}
       {tree.children.map((child) => {
         if (editing?.type === 'rename' && child.path === editing.path) {
           return (
-            <EditingRow
-              key={child.path}
-              type="rename"
-              depth={0}
-              defaultValue={editing.originalName}
-              placeholder="new name"
-              onConfirm={confirmRename}
-              onCancel={() => setEditing(null)}
+            <EditingRow key={child.path} type="rename" depth={0}
+              defaultValue={editing.originalName} placeholder="new name"
+              onConfirm={confirmRename} onCancel={() => setEditing(null)}
             />
           );
         }
         return (
           <TreeNodeRow
-            key={child.path}
-            node={child}
-            depth={0}
-            activeFilePath={activeFilePath}
+            key={child.path} node={child} depth={0}
+            activeFilePath={activeFilePath} selectedPath={selectedPath}
+            onSelect={handleSelect}
             onFileSelect={onFileSelect}
             onOpenContextMenu={handleNodeContext}
           />

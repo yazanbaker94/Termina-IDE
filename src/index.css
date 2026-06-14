@@ -818,10 +818,32 @@ body {
   color: var(--text-primary);
 }
 
+.file-item.selected,
+.tree-folder.selected {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  background: rgba(203, 166, 247, 0.08);
+}
+
+.file-item.selected.active,
+.tree-folder.selected.active {
+  outline-color: var(--accent);
+  background: var(--accent-dim);
+}
+
 .file-item.active,
 .tree-folder.active {
   background: var(--accent-dim);
   color: var(--accent);
+}
+
+.file-status-bar,
+.file-status-text {
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  text-align: center;
+  font-style: italic;
 }
 
 .file-icon {
