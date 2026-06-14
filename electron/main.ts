@@ -466,25 +466,25 @@ function logClipboardDebug(formats: string[]) {
   try {
     const text = clipboard.readText();
     const html = clipboard.readHTML();
+    const img = clipboard.readImage();
     console.log('[paste] readText length:', text?.length ?? 0);
+    if (text) console.log('[paste] readText preview:', text.slice(0, 300));
     console.log('[paste] readHTML length:', html?.length ?? 0);
-    console.log('[paste] readImage isEmpty:', clipboard.readImage().isEmpty());
+    if (html) console.log('[paste] readHTML preview:', html.slice(0, 300));
+    console.log('[paste] readImage isEmpty:', img.isEmpty());
+    if (!img.isEmpty()) console.log('[paste] readImage size:', img.getSize());
   } catch {}
   for (const fmt of formats) {
     try {
       const buf = clipboard.readBuffer(fmt);
       console.log(`[paste] buffer[${fmt}] length:`, buf?.length ?? 0);
-      // Log text preview for critical formats
-      if ((fmt === 'text/uri-list' || fmt.includes('url') || fmt.includes('text')) && buf && buf.length > 0) {
-        const preview = Buffer.from(buf).toString('utf8').slice(0, 300);
-        console.log(`[paste] ${fmt} utf8 preview:`, preview);
-        if (buf.length > 0) {
-          const preview16 = Buffer.from(buf).toString('utf16le').slice(0, 300);
-          console.log(`[paste] ${fmt} utf16le preview:`, preview16);
-        }
+      if (buf && buf.length > 0) {
+        try { console.log(`[paste] ${fmt} utf8 preview:`, Buffer.from(buf).toString('utf8').slice(0, 300)); } catch {}
+        try { console.log(`[paste] ${fmt} utf16le preview:`, Buffer.from(buf).toString('utf16le').slice(0, 300)); } catch {}
       }
     } catch {}
   }
+  console.log('[paste] nativeImage save will be attempted:', !clipboard.readImage().isEmpty());
 }
 
 function copyFilesToDir(resolvedDir: string, sourcePaths: string[]): { success: boolean; error?: string; path?: string; paths?: string[]; count?: number } {
@@ -1167,54 +1167,60 @@ function setupIPC() {
     try {
       const resolvedDir = safeResolvePath(targetDir);
       const formats = clipboard.availableFormats('clipboard');
+      console.log('=== [paste:start] targetDir:', resolvedDir);
       logClipboardDebug(formats);
 
       // 1. Try native bitmap image FIRST (screenshot, browser Copy Image)
       const nativeResult = saveNativeImage(resolvedDir);
+      console.log('[paste:step1] native image result:', nativeResult.success, nativeResult.path);
       if (nativeResult.success) return nativeResult;
 
       // 2. Try raw image buffers (e.g. image/png, image/jpeg, public.png)
       const imageBuffer = getClipboardImageBuffer(formats);
+      console.log('[paste:step2] image buffer found:', !!imageBuffer, imageBuffer?.ext);
       if (imageBuffer) {
-        console.log('[paste] found image buffer, ext:', imageBuffer.ext);
         return writeImageBuffer(resolvedDir, imageBuffer.buffer, imageBuffer.ext);
       }
 
       // 3. Try file paths and remote URLs from all clipboard formats
       const { paths: localPaths, remoteUrls: uriListRemoteUrls, debug } = getClipboardFilePaths(formats);
+      console.log('[paste:step3] local paths:', localPaths.length, 'remote URLs:', uriListRemoteUrls.length);
       if (localPaths.length > 0) {
-        console.log('[paste] found file paths:', localPaths);
         return copyFilesToDir(resolvedDir, localPaths);
       }
 
       let uriListDebug: any = null;
       if (formats.includes('text/uri-list') && localPaths.length === 0 && uriListRemoteUrls.length === 0) {
         uriListDebug = { uriListPreview: debug.uriListPreview, uriListBufferLen: debug.uriListBufferLen };
+        console.log('[paste:step3a] text/uri-list present but yielded nothing -> will report at end');
       }
 
       // 4. Try downloading remote image URLs
       const allRemoteUrls = [...uriListRemoteUrls];
       if (allRemoteUrls.length === 0) {
         const htmlResult = getImageFromHtmlOrText();
+        console.log('[paste:step4] HTML check: dataURI=', !!htmlResult.buffer, 'remoteUrls=', htmlResult.remoteUrls?.length ?? 0);
         if (htmlResult.buffer) {
-          console.log('[paste] found data URI image');
           return writeImageBuffer(resolvedDir, htmlResult.buffer, htmlResult.ext ?? '.png');
         }
         if (htmlResult.remoteUrls?.length) allRemoteUrls.push(...htmlResult.remoteUrls);
       }
       if (allRemoteUrls.length > 0) {
         const firstUrl = allRemoteUrls[0];
-        console.log('[paste] trying to download remote image:', firstUrl);
+        console.log('[paste:step4a] trying to download:', firstUrl);
         const dlResult = await downloadRemoteImageToDir(resolvedDir, firstUrl);
+        console.log('[paste:step4b] download result:', dlResult.success, dlResult.error);
         if (dlResult.success) return { success: true, path: dlResult.path };
         return { success: false, error: dlResult.error || 'Failed to download remote image.', formats };
       }
 
       // 5. Try plain text fallback
       const text = clipboard.readText();
+      console.log('[paste:step5] readText length:', text?.length ?? 0);
       if (text) {
         const lines = text.split(/[\n\r]+/).filter(Boolean);
         const potentialPaths = lines.map((l: string) => l.trim()).filter((p: string) => fs.existsSync(p));
+        console.log('[paste:step5a] plain text as file paths:', potentialPaths.length);
         if (potentialPaths.length > 0) {
           return copyFilesToDir(resolvedDir, potentialPaths);
         }
@@ -1223,9 +1229,12 @@ function setupIPC() {
         }
         const filePath = uniquePath(resolvedDir, 'pasted.txt');
         fs.writeFileSync(filePath, text, 'utf-8');
+        console.log('[paste:step5b] wrote pasted.txt');
         return { success: true, path: filePath };
       }
 
+      // Final failure
+      console.log('=== [paste:fail] all steps exhausted');
       if (uriListDebug) {
         return {
           success: false,
@@ -1237,6 +1246,7 @@ function setupIPC() {
 
       return { success: false, error: 'No pasteable content found.', formats };
     } catch (err: any) {
+      console.error('[paste:error]', err);
       return { success: false, error: err.message };
     }
   });

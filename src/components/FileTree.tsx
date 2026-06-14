@@ -274,65 +274,78 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
 
   // Context-menu Paste — no DOM event, try navigator.clipboard API then main-process
   const contextMenuPaste = useCallback(async (targetDir: string) => {
+    console.log('=== [cm-paste:start] targetDir:', targetDir);
+    
     // Log clipboard state for debugging
     try {
       const debug = await window.electronAPI.getClipboardDebug();
-      console.log('[paste] context-menu debug:', {
+      console.log('[cm-paste:debug]', {
         platform: debug.platform,
         formats: debug.formats,
         imageIsEmpty: debug.imageIsEmpty,
         textLength: debug.textLength,
         htmlLength: debug.htmlLength,
         bufferLengths: debug.bufferLengths,
-        navigatorClipboardExists: typeof navigator.clipboard?.read === 'function',
+        navigatorClipboardExists: typeof navigator?.clipboard?.read === 'function',
       });
-    } catch {}
+    } catch (e) { console.log('[cm-paste:debug:error]', e); }
 
     // Try navigator.clipboard.read() for image blobs
     try {
-      if (typeof navigator.clipboard?.read === 'function') {
+      if (typeof navigator?.clipboard?.read === 'function') {
+        console.log('[cm-paste:nav] attempting navigator.clipboard.read()');
         const clipboardItems = await navigator.clipboard.read();
-        console.log('[paste] navigator.clipboard items:', clipboardItems.length);
-        for (const item of clipboardItems) {
-          console.log('[paste] ClipboardItem types:', item.types);
+        console.log('[cm-paste:nav] items count:', clipboardItems.length);
+        for (let i = 0; i < clipboardItems.length; i++) {
+          const item = clipboardItems[i];
+          console.log(`[cm-paste:nav] item[${i}] types:`, item.types);
           for (const type of item.types) {
             if (type.startsWith('image/')) {
               const blob = await item.getType(type);
-              console.log('[paste] found image blob via navigator.clipboard, size:', blob.size);
+              console.log(`[cm-paste:nav] image blob type=${type} size=${blob.size}`);
               await pasteBlobToDir(targetDir, blob);
               return;
             }
             if (type === 'text/html') {
               const text = await (await item.getType(type)).text();
+              console.log('[cm-paste:nav] html length:', text.length, 'preview:', text.slice(0, 200));
               const match = text.match(/<img[^>]+src=["']([^"']+)["']/i);
               if (match) {
                 const src = match[1];
+                console.log('[cm-paste:nav] img src:', src.slice(0, 200));
                 if (src.startsWith('data:image/')) {
                   const parts = src.split(',');
                   if (parts[1]) {
                     const ext = src.includes('image/png') ? '.png' : src.includes('image/jpeg') ? '.jpg' : '.png';
                     const bytes = Array.from(new Uint8Array(atob(parts[1]).split('').map(c => c.charCodeAt(0))));
                     const r = await window.electronAPI.writePastedBuffer({ targetDir, mimeType: `image/${ext.slice(1)}`, bytes });
+                    console.log('[cm-paste:nav] data:image write result:', r.success);
                     if (r.success) { await onRefreshTree(); if (r.path) onFileSelect({ name: r.path.split(/[\\/]/).pop() ?? 'pasted', path: r.path, type: 'file' }); return; }
                   }
                 }
                 if (src.startsWith('blob:')) {
+                  console.log('[cm-paste:nav] blob: URL detected — not supported');
                   alert('This app cannot paste private browser blob URLs. Use Ctrl+V after copying the image itself, or drag/download the image file.');
                   return;
                 }
               }
             }
             if (type === 'text/plain' || type === 'text/uri-list') {
-              // Let main-process handle these
+              const text = await (await item.getType(type)).text();
+              console.log(`[cm-paste:nav] ${type} length:`, text.length, 'preview:', text.slice(0, 200));
             }
           }
         }
+        console.log('[cm-paste:nav] no usable image found in navigator.clipboard');
+      } else {
+        console.log('[cm-paste:nav] navigator.clipboard.read not available');
       }
     } catch (e: any) {
-      console.log('[paste] navigator.clipboard.read() failed:', e.message);
+      console.log('[cm-paste:nav:error]', e.name, e.message);
     }
 
     // Fallback to main-process
+    console.log('[cm-paste:fallback] calling main-process pasteFromClipboard for', targetDir);
     if (onPaste) await onPaste(targetDir);
   }, [onPaste, pasteBlobToDir, onRefreshTree, onFileSelect]);
 
