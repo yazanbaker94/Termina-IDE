@@ -274,23 +274,67 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
 
   // Context-menu Paste — no DOM event, try navigator.clipboard API then main-process
   const contextMenuPaste = useCallback(async (targetDir: string) => {
+    // Log clipboard state for debugging
+    try {
+      const debug = await window.electronAPI.getClipboardDebug();
+      console.log('[paste] context-menu debug:', {
+        platform: debug.platform,
+        formats: debug.formats,
+        imageIsEmpty: debug.imageIsEmpty,
+        textLength: debug.textLength,
+        htmlLength: debug.htmlLength,
+        bufferLengths: debug.bufferLengths,
+        navigatorClipboardExists: typeof navigator.clipboard?.read === 'function',
+      });
+    } catch {}
+
     // Try navigator.clipboard.read() for image blobs
     try {
-      const clipboardItems = await navigator.clipboard.read();
-      for (const item of clipboardItems) {
-        for (const type of item.types) {
-          if (type.match(/^image\//)) {
-            const blob = await item.getType(type);
-            await pasteBlobToDir(targetDir, blob);
-            return;
+      if (typeof navigator.clipboard?.read === 'function') {
+        const clipboardItems = await navigator.clipboard.read();
+        console.log('[paste] navigator.clipboard items:', clipboardItems.length);
+        for (const item of clipboardItems) {
+          console.log('[paste] ClipboardItem types:', item.types);
+          for (const type of item.types) {
+            if (type.startsWith('image/')) {
+              const blob = await item.getType(type);
+              console.log('[paste] found image blob via navigator.clipboard, size:', blob.size);
+              await pasteBlobToDir(targetDir, blob);
+              return;
+            }
+            if (type === 'text/html') {
+              const text = await (await item.getType(type)).text();
+              const match = text.match(/<img[^>]+src=["']([^"']+)["']/i);
+              if (match) {
+                const src = match[1];
+                if (src.startsWith('data:image/')) {
+                  const parts = src.split(',');
+                  if (parts[1]) {
+                    const ext = src.includes('image/png') ? '.png' : src.includes('image/jpeg') ? '.jpg' : '.png';
+                    const bytes = Array.from(new Uint8Array(atob(parts[1]).split('').map(c => c.charCodeAt(0))));
+                    const r = await window.electronAPI.writePastedBuffer({ targetDir, mimeType: `image/${ext.slice(1)}`, bytes });
+                    if (r.success) { await onRefreshTree(); if (r.path) onFileSelect({ name: r.path.split(/[\\/]/).pop() ?? 'pasted', path: r.path, type: 'file' }); return; }
+                  }
+                }
+                if (src.startsWith('blob:')) {
+                  alert('This app cannot paste private browser blob URLs. Use Ctrl+V after copying the image itself, or drag/download the image file.');
+                  return;
+                }
+              }
+            }
+            if (type === 'text/plain' || type === 'text/uri-list') {
+              // Let main-process handle these
+            }
           }
         }
       }
-    } catch { /* navigator.clipboard.read() not available or denied */ }
+    } catch (e: any) {
+      console.log('[paste] navigator.clipboard.read() failed:', e.message);
+    }
 
     // Fallback to main-process
     if (onPaste) await onPaste(targetDir);
-  }, [onPaste, pasteBlobToDir]);
+  }, [onPaste, pasteBlobToDir, onRefreshTree, onFileSelect]);
 
   // Close menu on Escape, scroll, outside click
   useEffect(() => {

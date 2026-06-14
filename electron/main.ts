@@ -1169,20 +1169,30 @@ function setupIPC() {
       const formats = clipboard.availableFormats('clipboard');
       logClipboardDebug(formats);
 
-      // 1. Try file paths and remote URLs from all clipboard formats
+      // 1. Try native bitmap image FIRST (screenshot, browser Copy Image)
+      const nativeResult = saveNativeImage(resolvedDir);
+      if (nativeResult.success) return nativeResult;
+
+      // 2. Try raw image buffers (e.g. image/png, image/jpeg, public.png)
+      const imageBuffer = getClipboardImageBuffer(formats);
+      if (imageBuffer) {
+        console.log('[paste] found image buffer, ext:', imageBuffer.ext);
+        return writeImageBuffer(resolvedDir, imageBuffer.buffer, imageBuffer.ext);
+      }
+
+      // 3. Try file paths and remote URLs from all clipboard formats
       const { paths: localPaths, remoteUrls: uriListRemoteUrls, debug } = getClipboardFilePaths(formats);
       if (localPaths.length > 0) {
         console.log('[paste] found file paths:', localPaths);
         return copyFilesToDir(resolvedDir, localPaths);
       }
 
-      // Track text/uri-list failure for end-of-chain reporting (but don't abort yet)
       let uriListDebug: any = null;
       if (formats.includes('text/uri-list') && localPaths.length === 0 && uriListRemoteUrls.length === 0) {
         uriListDebug = { uriListPreview: debug.uriListPreview, uriListBufferLen: debug.uriListBufferLen };
       }
 
-      // 2. Try downloading remote image URLs
+      // 4. Try downloading remote image URLs
       const allRemoteUrls = [...uriListRemoteUrls];
       if (allRemoteUrls.length === 0) {
         const htmlResult = getImageFromHtmlOrText();
@@ -1198,17 +1208,6 @@ function setupIPC() {
         const dlResult = await downloadRemoteImageToDir(resolvedDir, firstUrl);
         if (dlResult.success) return { success: true, path: dlResult.path };
         return { success: false, error: dlResult.error || 'Failed to download remote image.', formats };
-      }
-
-      // 3. Try native bitmap image (screenshot / browser copy image)
-      const nativeResult = saveNativeImage(resolvedDir);
-      if (nativeResult.success) return nativeResult;
-
-      // 4. Try raw image buffers
-      const imageBuffer = getClipboardImageBuffer(formats);
-      if (imageBuffer) {
-        console.log('[paste] found image buffer, ext:', imageBuffer.ext);
-        return writeImageBuffer(resolvedDir, imageBuffer.buffer, imageBuffer.ext);
       }
 
       // 5. Try plain text fallback
@@ -1227,7 +1226,6 @@ function setupIPC() {
         return { success: true, path: filePath };
       }
 
-      // All methods failed — report text/uri-list info if that was the only format
       if (uriListDebug) {
         return {
           success: false,
@@ -1397,6 +1395,15 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  // Allow clipboard-read permission for navigator.clipboard.read() in renderer
+  mainWindow.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
+    if (permission === 'clipboard-read' || permission === 'clipboard-sanitized-write') {
+      callback(true);
+    } else {
+      callback(false);
+    }
   });
 
   mainWindow.on('closed', () => {
