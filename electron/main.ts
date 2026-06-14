@@ -542,6 +542,26 @@ function copyFilesToDir(resolvedDir: string, sourcePaths: string[]): { success: 
   return { success: true, count: copiedPaths.length, paths: copiedPaths, path: copiedPaths[0] };
 }
 
+function getWindowsClipboardFileDropList(): string[] {
+  if (process.platform !== 'win32') return [];
+  try {
+    const script = 'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Clipboard]::GetFileDropList() | ForEach-Object { $_ }';
+    const output = execFileSync('powershell.exe', ['-NoProfile', '-STA', '-Command', script], {
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    if (!output) return [];
+    const paths = output.split(/[\r\n]+/).map((l: string) => l.trim()).filter((p: string) => fs.existsSync(p));
+    console.log('[paste:windows-filedrop] paths found:', paths.length);
+    for (const p of paths) console.log('[paste:windows-filedrop]  ', p);
+    return paths;
+  } catch (e: any) {
+    console.log('[paste:windows-filedrop] failed:', e.message);
+    return [];
+  }
+}
+
 function safeResolvePath(requestedPath: string): string {
   if (!rootPath) {
     throw new Error('No project folder is open.');
@@ -1234,6 +1254,13 @@ function setupIPC() {
       console.log('[paste:step2] image buffer found:', !!imageBuffer, imageBuffer?.ext);
       if (imageBuffer) {
         return writeImageBuffer(resolvedDir, imageBuffer.buffer, imageBuffer.ext);
+      }
+
+      // 2b. Windows FileDropList fallback — reads actual Explorer-copied file paths
+      const fileDropPaths = getWindowsClipboardFileDropList();
+      if (fileDropPaths.length > 0) {
+        console.log('[paste:step2b] Windows FileDropList found', fileDropPaths.length, 'files');
+        return copyFilesToDir(resolvedDir, fileDropPaths);
       }
 
       // 3. Try file paths and remote URLs from all clipboard formats
