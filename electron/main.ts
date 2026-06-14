@@ -21,12 +21,11 @@ const IGNORE_DIRS = new Set([
   'coverage', '__pycache__', '.next', '.nuxt', '.cache', '.vite',
 ]);
 const HIDDEN_EXTS = new Set([
-  '.woff', '.woff2', '.ttf', '.eot', '.otf',
-  '.mp3', '.mp4', '.avi', '.mov', '.mkv', '.webm',
   '.gz', '.zip', '.tar', '.7z', '.rar',
   '.exe', '.dll', '.so', '.dylib', '.wasm',
   '.pyc', '.class', '.o', '.obj',
   '.db', '.sqlite', '.sqlite3',
+  '.woff', '.woff2', '.ttf', '.eot', '.otf',
 ]);
 
 const BINARY_EXTS = new Set([
@@ -103,18 +102,20 @@ function parseFileUri(uri: string): string | null {
 
 function classifyClipboardUri(uri: string): { kind: 'file'; path: string } | { kind: 'remote'; url: string } | null {
   const trimmed = uri.trim();
-  if (trimmed.startsWith('file://')) {
-    const resolved = parseFileUri(trimmed);
+  // Strip surrounding quotes
+  const unquoted = trimmed.replace(/^["']|["']$/g, '');
+  if (unquoted.startsWith('file://')) {
+    const resolved = parseFileUri(unquoted);
     if (resolved) return { kind: 'file', path: resolved };
     return null;
   }
-  if (trimmed.match(/^https?:\/\//i)) {
-    return { kind: 'remote', url: trimmed };
+  if (unquoted.match(/^https?:\/\//i)) {
+    return { kind: 'remote', url: unquoted };
   }
-  // Plain absolute path
-  if (trimmed.match(/^[a-zA-Z]:[\\/]/) || trimmed.startsWith('/')) {
+  // Plain absolute path (Windows drive letter or Unix /)
+  if (unquoted.match(/^[a-zA-Z]:[\\/]/) || unquoted.startsWith('/')) {
     try {
-      const resolved = path.resolve(decodeURIComponent(trimmed));
+      const resolved = path.resolve(decodeURIComponent(unquoted));
       if (fs.existsSync(resolved)) return { kind: 'file', path: resolved };
     } catch {}
   }
@@ -200,19 +201,54 @@ function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls
     }
   };
 
-  // FileNameW / FileName
+  // FileNameW / FileName — Windows Explorer file copy with verbose debug
   const fileFormats = formats.filter((f: string) => f.toLowerCase().includes('filename'));
   for (const fmt of fileFormats) {
+    console.log(`[paste:fn] trying format: ${fmt}`);
     try {
       const raw = clipboard.readBuffer(fmt);
+      console.log(`[paste:fn] ${fmt} buffer length:`, raw?.length ?? 0);
       if (raw && raw.length > 0) {
-        const text = Buffer.from(raw).toString('utf16le');
-        for (const entry of text.split('\0').filter(Boolean)) {
-          const classified = classifyClipboardUri(entry.trim());
-          if (classified) addItem(classified);
+        // Try UTF-16LE first (FileNameW on Windows)
+        const text16 = Buffer.from(raw).toString('utf16le');
+        console.log(`[paste:fn] ${fmt} utf16le length:`, text16.length, 'preview:', text16.slice(0, 300));
+        
+        // Split by NUL characters — each is a separate path
+        const entries = text16.split('\0').map(e => e.trim()).filter(Boolean);
+        console.log(`[paste:fn] ${fmt} null-split entries:`, entries.length);
+        
+        for (const entry of entries) {
+          const classified = classifyClipboardUri(entry);
+          if (classified) {
+            console.log(`[paste:fn] ${fmt} path: ${classified.kind} ${classified.kind === 'file' ? classified.path : classified.url}`);
+            addItem(classified);
+          } else {
+            console.log(`[paste:fn] ${fmt} unclassified entry:`, entry.slice(0, 200));
+            // Try plain path fallback — some formats give bare Windows paths
+            try {
+              const resolved = path.resolve(entry);
+              if (fs.existsSync(resolved)) {
+                console.log(`[paste:fn] ${fmt} found via path.resolve:`, resolved);
+                addItem({ kind: 'file', path: resolved });
+              }
+            } catch {}
+          }
+        }
+
+        // Also try UTF-8 (FileName on older Windows or non-Windows)
+        if (localPaths.length === 0) {
+          const text8 = Buffer.from(raw).toString('utf8');
+          console.log(`[paste:fn] ${fmt} utf8 length:`, text8.length, 'preview:', text8.slice(0, 300));
+          for (const entry of text8.split('\0').map(e => e.trim()).filter(Boolean)) {
+            const classified = classifyClipboardUri(entry);
+            if (classified) {
+              console.log(`[paste:fn] ${fmt} utf8 path:`, classified.kind, classified.kind === 'file' ? classified.path : classified.url);
+              addItem(classified);
+            }
+          }
         }
       }
-    } catch (e) { console.log(`[paste] ${fmt} failed:`, e); }
+    } catch (e) { console.log(`[paste:fn] ${fmt} failed:`, e); }
   }
 
   // text/uri-list — all platforms, with robust extraction
@@ -1254,32 +1290,21 @@ function setupIPC() {
   ipcMain.handle('fs:copyExternalFiles', async (_event, targetDir: string, sourcePaths: string[]) => {
     try {
       const resolvedDir = safeResolvePath(targetDir);
-      let count = 0;
+      const copiedPaths: string[] = [];
       for (const src of sourcePaths) {
         try {
           const srcName = path.basename(src);
-          let dest = path.join(resolvedDir, srcName);
-          if (fs.existsSync(dest)) {
-            const ext = path.extname(srcName);
-            const base = path.basename(srcName, ext);
-            let copyName = `${base} copy${ext}`;
-            let copyIdx = 2;
-            while (fs.existsSync(path.join(resolvedDir, copyName))) {
-              copyName = `${base} copy ${copyIdx}${ext}`;
-              copyIdx++;
-            }
-            dest = path.join(resolvedDir, copyName);
-          }
+          const dest = uniquePath(resolvedDir, srcName);
           const stat = fs.statSync(src);
           if (stat.isDirectory()) {
             fs.cpSync(src, dest, { recursive: true, errorOnExist: false });
           } else {
             fs.copyFileSync(src, dest);
           }
-          count++;
-        } catch {}
+          copiedPaths.push(dest);
+        } catch (e) { console.log('[copy-external] failed:', src, e); }
       }
-      return { success: true, count };
+      return { success: true, count: copiedPaths.length, paths: copiedPaths, path: copiedPaths[0] };
     } catch (err: any) {
       return { success: false, error: err.message };
     }
