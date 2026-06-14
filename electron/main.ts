@@ -1113,16 +1113,6 @@ function setupIPC() {
     }
   });
 
-  ipcMain.handle('fs:statFile', async (_event, filePath: string) => {
-    try {
-      const resolved = safeResolvePath(filePath);
-      const stat = fs.statSync(resolved);
-      return { exists: true, type: stat.isDirectory() ? 'directory' as const : 'file' as const, mtimeMs: stat.mtimeMs, size: stat.size };
-    } catch {
-      return { exists: false };
-    }
-  });
-
   ipcMain.handle('fs:createFolder', async (_event, parentDir: string, name: string) => {
     try {
       const resolved = safeResolvePath(path.join(parentDir, name));
