@@ -10,6 +10,7 @@ interface FileTreeProps {
   onFileSelect: (node: FileNode) => void;
   onRefreshTree: () => Promise<void> | void;
   onCloseActiveFile?: () => void;
+  onPaste?: (targetDir: string) => Promise<void>;
 }
 
 interface ContextMenuData {
@@ -200,12 +201,25 @@ const EditingRow: React.FC<EditingRowProps> = ({ type, depth, defaultValue, plac
   );
 };
 
-const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect, onRefreshTree, onCloseActiveFile }) => {
+const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect, onRefreshTree, onCloseActiveFile, onPaste }) => {
   const [menu, setMenu] = useState<ContextMenuData | null>(null);
   const [editing, setEditing] = useState<EditingState | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const rootPath = tree?.path ?? '';
   const fileTreeRef = useRef<HTMLDivElement>(null);
+
+  // Ctrl+V paste handler — paste into parent dir of active file, or root
+  const handleKeyDown = useCallback(async (e: React.KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return;
+      e.preventDefault();
+      let targetDir = rootPath;
+      if (activeFilePath) targetDir = activeFilePath.replace(/[\\/][^\\/]*$/, '');
+      if (!targetDir || !onPaste) return;
+      await onPaste(targetDir);
+    }
+  }, [rootPath, activeFilePath, onPaste]);
 
   // Close menu on Escape, scroll, outside click
   useEffect(() => {
@@ -364,7 +378,8 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
   }
 
   return (
-    <div ref={fileTreeRef} className="file-list" onContextMenu={handleRootContext} onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
+    <div ref={fileTreeRef} className="file-list" tabIndex={0} onKeyDown={handleKeyDown}
+      onContextMenu={handleRootContext} onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
       {editing?.type === 'createFile' || editing?.type === 'createFolder' ? (
         <EditingRow
           type={editing.type}

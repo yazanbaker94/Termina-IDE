@@ -35,6 +35,7 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
   onClose,
 }) => {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const applyingExternalChangeRef = useRef(false);
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
 
@@ -57,11 +58,18 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
     const model = ed.getModel();
     if (!model) return;
     if (model.getValue() !== file.content) {
+      applyingExternalChangeRef.current = true;
       const viewState = ed.saveViewState();
       model.setValue(file.content);
       if (viewState) ed.restoreViewState(viewState);
+      setTimeout(() => { applyingExternalChangeRef.current = false; }, 50);
     }
   }, [file]);
+
+  const handleChange = useCallback((val: string | undefined) => {
+    if (applyingExternalChangeRef.current) return;
+    onChange(val);
+  }, [onChange]);
 
   if (!file || !file.path) {
     return (
@@ -102,7 +110,7 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
             height="100%"
             language={file.language}
             defaultValue={file.content}
-            onChange={onChange}
+            onChange={handleChange}
             onMount={handleMount}
             theme="vs-dark"
             options={{

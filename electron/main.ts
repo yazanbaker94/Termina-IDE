@@ -134,23 +134,62 @@ function parseUriList(text: string): string[] {
 }
 
 function readClipboardFormatText(format: string): string {
+  // Try all known approaches to extract text from a clipboard format
+  const best: string[] = [];
+
+  // 1. clipboard.read() — may return string for custom formats
   try {
-    const data = clipboard.read(format);
-    return data.toString();
-  } catch {
-    try {
-      const buf = clipboard.readBuffer(format);
-      return Buffer.from(buf).toString('utf8');
-    } catch {
-      return '';
+    const val = clipboard.read(format);
+    if (typeof val === 'string') {
+      const s = val.trim();
+      if (s) best.push(s);
     }
+  } catch {}
+
+  // 2. clipboard.readBuffer() — raw buffer, try multiple encodings
+  try {
+    const buf = clipboard.readBuffer(format);
+    if (buf && buf.length > 0) {
+      // Try UTF-8
+      try { const s = Buffer.from(buf).toString('utf8').trim(); if (s) best.push(s); } catch {}
+      // Try UTF-16LE
+      try { const s = Buffer.from(buf).toString('utf16le').trim(); if (s) best.push(s); } catch {}
+      // Try Latin-1
+      try { const s = Buffer.from(buf).toString('latin1').trim(); if (s) best.push(s); } catch {}
+    }
+  } catch {}
+
+  // 3. clipboard.readText() as last resort for generic text
+  try {
+    const s = clipboard.readText('clipboard');
+    if (s && s.trim()) best.push(s.trim());
+  } catch {}
+
+  // Return the first string that looks like it contains useful content
+  for (const s of best) {
+    if (s.match(/^(file|https?):\/\//i)) return s;
+    if (s.match(/^[a-zA-Z]:[\\/]/)) return s;
+    if (s.startsWith('/')) return s;
+    if (s.match(/data:image\//)) return s;
   }
+  // Fallback: return longest string
+  return best.reduce((a, b) => (b.length > a.length ? b : a), best[0] ?? '');
 }
 
-function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls: string[] } {
+function normalizeClipboardText(text: string): string {
+  if (!text) return '';
+  let s = text.replace(/^\0+/, '').replace(/\0+$/, ''); // strip leading/trailing NULs
+  s = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n'); // normalize line endings
+  // Replace NULs with spaces only when they separate path components
+  // But keep them intact for file name lists (split later with \0)
+  return s;
+}
+
+function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls: string[]; debug: { uriListPreview?: string; uriListBufferLen?: number } } {
   const localPaths: string[] = [];
   const remoteUrls: string[] = [];
   const seen = new Set<string>();
+  const debug: { uriListPreview?: string; uriListBufferLen?: number } = {};
 
   const addItem = (item: NonNullable<ReturnType<typeof classifyClipboardUri>>) => {
     if (item.kind === 'file') {
@@ -161,7 +200,7 @@ function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls
     }
   };
 
-  // FileNameW / FileName (Windows, but try on all platforms)
+  // FileNameW / FileName
   const fileFormats = formats.filter((f: string) => f.toLowerCase().includes('filename'));
   for (const fmt of fileFormats) {
     try {
@@ -176,36 +215,42 @@ function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls
     } catch (e) { console.log(`[paste] ${fmt} failed:`, e); }
   }
 
-  // text/uri-list — all platforms
+  // text/uri-list — all platforms, with robust extraction
   if (formats.includes('text/uri-list')) {
     try {
       const text = readClipboardFormatText('text/uri-list');
-      for (const uri of parseUriList(text)) {
-        const classified = classifyClipboardUri(uri);
-        if (classified) addItem(classified);
+      debug.uriListPreview = text ? text.slice(0, 500) : undefined;
+      try {
+        const buf = clipboard.readBuffer('text/uri-list');
+        debug.uriListBufferLen = buf?.length ?? 0;
+      } catch {}
+      console.log('[paste] text/uri-list len:', text?.length ?? 0, 'bufferLen:', debug.uriListBufferLen);
+
+      if (text) {
+        const uris = parseUriList(text);
+        console.log('[paste] text/uri-list parsed', uris.length, 'URIs');
+        for (const uri of uris) {
+          const classified = classifyClipboardUri(uri);
+          if (classified) { console.log('[paste] classified URI:', classified.kind, classified.kind === 'file' ? classified.path : classified.url); addItem(classified); }
+          else { console.log('[paste] unclassified URI:', uri.slice(0, 200)); }
+        }
       }
     } catch (e) { console.log('[paste] text/uri-list failed:', e); }
   }
 
-  // x-special/gnome-copied-files — all platforms
+  // x-special/gnome-copied-files
   if (formats.includes('x-special/gnome-copied-files')) {
     try {
       const text = readClipboardFormatText('x-special/gnome-copied-files');
-      for (const uri of parseUriList(text)) {
-        const classified = classifyClipboardUri(uri);
-        if (classified) addItem(classified);
-      }
+      if (text) for (const uri of parseUriList(text)) { const r = classifyClipboardUri(uri); if (r) addItem(r); }
     } catch (e) { console.log('[paste] gnome-copied-files failed:', e); }
   }
 
-  // public.file-url — all platforms
+  // public.file-url
   if (formats.includes('public.file-url')) {
     try {
       const text = readClipboardFormatText('public.file-url');
-      for (const line of text.split(/[\n\r]+/).filter(Boolean)) {
-        const classified = classifyClipboardUri(line.trim());
-        if (classified) addItem(classified);
-      }
+      if (text) for (const line of text.split(/[\n\r]+/).filter(Boolean)) { const r = classifyClipboardUri(line.trim()); if (r) addItem(r); }
     } catch (e) { console.log('[paste] public.file-url failed:', e); }
   }
 
@@ -213,14 +258,11 @@ function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls
   if (formats.includes('public.url')) {
     try {
       const text = readClipboardFormatText('public.url');
-      for (const line of text.split(/[\n\r]+/).filter(Boolean)) {
-        const classified = classifyClipboardUri(line.trim());
-        if (classified) addItem(classified);
-      }
+      if (text) for (const line of text.split(/[\n\r]+/).filter(Boolean)) { const r = classifyClipboardUri(line.trim()); if (r) addItem(r); }
     } catch (e) { console.log('[paste] public.url failed:', e); }
   }
 
-  // NSFilenamesPboardType — macOS plist
+  // NSFilenamesPboardType
   const nsFormat = formats.find((f: string) => f.includes('NSFilenamesPboard') || f.includes('NSFilenames'));
   if (nsFormat) {
     try {
@@ -228,60 +270,36 @@ function getClipboardFilePaths(formats: string[]): { paths: string[]; remoteUrls
       if (raw) {
         const text = raw.toString('utf8');
         const stringMatches = text.match(/<string>([^<]+)<\/string>/g);
-        if (stringMatches) {
-          for (const m of stringMatches) {
-            const content = m.replace(/<\/?string>/g, '');
-            const classified = classifyClipboardUri(content.trim());
-            if (classified) addItem(classified);
-          }
-        } else {
-          for (const line of text.split(/[\n\r\0]+/)) {
-            const classified = classifyClipboardUri(line.trim());
-            if (classified) addItem(classified);
-          }
-        }
+        if (stringMatches) for (const m of stringMatches) { const r = classifyClipboardUri(m.replace(/<\/?string>/g, '').trim()); if (r) addItem(r); }
+        else for (const line of text.split(/[\n\r\0]+/)) { const r = classifyClipboardUri(line.trim()); if (r) addItem(r); }
       }
     } catch (e) { console.log('[paste] NSFilenames failed:', e); }
   }
 
-  // Also scan clipboard.readText() for URIs
+  // clipboard.readText() scan
   try {
     const text = clipboard.readText();
     if (text) {
-      // Check if it looks like URI lines
       const urlRegex = /(?:https?|file):\/\/[^\s]+/gi;
-      const matches = text.match(urlRegex);
-      if (matches) {
-        for (const url of matches) {
-          const classified = classifyClipboardUri(url);
-          if (classified) addItem(classified);
-        }
-      }
-      // Also try plain file path lines
+      let match;
+      while ((match = urlRegex.exec(text)) !== null) { const r = classifyClipboardUri(match[0]); if (r) addItem(r); }
       for (const line of text.split(/[\n\r]+/).filter(Boolean)) {
-        const trimmed = line.trim();
-        if (trimmed.match(/^[a-zA-Z]:[\\/]/) || trimmed.startsWith('/')) {
-          const classified = classifyClipboardUri(trimmed);
-          if (classified) addItem(classified);
-        }
+        if (line.trim().match(/^[a-zA-Z]:[\\/]/) || line.trim().startsWith('/')) { const r = classifyClipboardUri(line.trim()); if (r) addItem(r); }
       }
     }
-  } catch (e) { console.log('[paste] readText scan failed:', e); }
+  } catch (e) {}
 
-  // HTML <img src="..."> and <a href="...">
+  // HTML scan
   try {
     const html = clipboard.readHTML();
     if (html) {
       const srcRegex = /(?:src|href)=["']([^"']+)["']/gi;
       let match;
-      while ((match = srcRegex.exec(html)) !== null) {
-        const classified = classifyClipboardUri(match[1]);
-        if (classified) addItem(classified);
-      }
+      while ((match = srcRegex.exec(html)) !== null) { const r = classifyClipboardUri(match[1]); if (r) addItem(r); }
     }
-  } catch (e) { console.log('[paste] HTML scan failed:', e); }
+  } catch (e) {}
 
-  return { paths: localPaths, remoteUrls };
+  return { paths: localPaths, remoteUrls, debug };
 }
 
 async function downloadRemoteImageToDir(targetDir: string, url: string): Promise<{ success: boolean; path?: string; error?: string }> {
@@ -456,6 +474,15 @@ function logClipboardDebug(formats: string[]) {
     try {
       const buf = clipboard.readBuffer(fmt);
       console.log(`[paste] buffer[${fmt}] length:`, buf?.length ?? 0);
+      // Log text preview for critical formats
+      if ((fmt === 'text/uri-list' || fmt.includes('url') || fmt.includes('text')) && buf && buf.length > 0) {
+        const preview = Buffer.from(buf).toString('utf8').slice(0, 300);
+        console.log(`[paste] ${fmt} utf8 preview:`, preview);
+        if (buf.length > 0) {
+          const preview16 = Buffer.from(buf).toString('utf16le').slice(0, 300);
+          console.log(`[paste] ${fmt} utf16le preview:`, preview16);
+        }
+      }
     } catch {}
   }
 }
@@ -1143,13 +1170,23 @@ function setupIPC() {
       logClipboardDebug(formats);
 
       // 1. Try file paths and remote URLs from all clipboard formats
-      const { paths: localPaths, remoteUrls: uriListRemoteUrls } = getClipboardFilePaths(formats);
+      const { paths: localPaths, remoteUrls: uriListRemoteUrls, debug } = getClipboardFilePaths(formats);
       if (localPaths.length > 0) {
         console.log('[paste] found file paths:', localPaths);
         return copyFilesToDir(resolvedDir, localPaths);
       }
 
-      // 2. Try downloading remote image URLs (from text/uri-list, HTML, etc.)
+      // 2a. If text/uri-list was present but empty, give specific error
+      if (formats.includes('text/uri-list') && localPaths.length === 0 && uriListRemoteUrls.length === 0) {
+        return {
+          success: false,
+          error: 'Clipboard has text/uri-list but CommandCode-IDE could not extract any usable URI from it.',
+          formats,
+          debug: { uriListPreview: debug.uriListPreview, uriListBufferLen: debug.uriListBufferLen },
+        };
+      }
+
+      // 2b. Try downloading remote image URLs
       const allRemoteUrls = [...uriListRemoteUrls];
       // Also check HTML for remote image URLs
       if (allRemoteUrls.length === 0) {
@@ -1184,13 +1221,11 @@ function setupIPC() {
       // 5. Try plain text fallback
       const text = clipboard.readText();
       if (text) {
-        // Try interpreting as file paths
         const lines = text.split(/[\n\r]+/).filter(Boolean);
         const potentialPaths = lines.map((l: string) => l.trim()).filter((p: string) => fs.existsSync(p));
         if (potentialPaths.length > 0) {
           return copyFilesToDir(resolvedDir, potentialPaths);
         }
-        // If text is just a URL, don't create pasted.txt — user likely wanted to paste an image
         if (text.trim().match(/^https?:\/\//)) {
           return { success: false, error: 'Clipboard contains a URL, but it is not an image.', formats };
         }

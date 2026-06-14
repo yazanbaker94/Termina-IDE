@@ -36,6 +36,7 @@ export interface AgentStatusResult {
 export interface FileChangeEvent {
   path: string;
   changeType: 'added' | 'changed' | 'deleted';
+  isDirectory?: boolean;
 }
 
 export interface FileDiff {

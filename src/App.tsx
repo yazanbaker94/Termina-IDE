@@ -142,6 +142,13 @@ const App: React.FC = () => {
     } catch {}
   }, []);
 
+  // Normalized path key for case-insensitive comparison
+  const fileKey = useCallback((p: string): string => {
+    let n = p.replace(/\\/g, '/');
+    if (n.match(/^[a-z]:\//i)) n = n.charAt(0).toLowerCase() + n.slice(1);
+    return n;
+  }, []);
+
   // Shared file-changed handler for the watcher listener
   const handleFileChanged = useCallback((evt: FileChangeEvent) => {
     const owningId = activeSessionIdRef.current;
@@ -152,31 +159,33 @@ const App: React.FC = () => {
         updateSessionRuntime(owningId, { changedFiles: [...prev, evt] });
       }
     }
+    const key = fileKey(evt.path);
     if (evt.changeType === 'deleted') {
-      pendingDeletedPathsRef.current.add(evt.path);
-      pendingChangedPathsRef.current.delete(evt.path);
+      pendingDeletedPathsRef.current.add(key);
+      pendingChangedPathsRef.current.delete(key);
     } else {
-      pendingChangedPathsRef.current.add(evt.path);
-      pendingDeletedPathsRef.current.delete(evt.path);
+      pendingChangedPathsRef.current.add(key);
+      pendingDeletedPathsRef.current.delete(key);
     }
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     refreshTimerRef.current = setTimeout(async () => {
       await refreshFileTree();
       await refreshGitStatus();
-      const changedSet = new Set(pendingChangedPathsRef.current);
-      const deletedSet = new Set(pendingDeletedPathsRef.current);
+      const changedKeys = new Set(pendingChangedPathsRef.current);
+      const deletedKeys = new Set(pendingDeletedPathsRef.current);
       pendingChangedPathsRef.current.clear();
       pendingDeletedPathsRef.current.clear();
       const currentFile = activeFileRef.current;
       const currentDiff = activeDiffRef.current;
       const dirty = isDirtyRef.current;
       if (currentFile) {
-        if (deletedSet.has(currentFile.path)) {
+        const currentKey = fileKey(currentFile.path);
+        if (deletedKeys.has(currentKey)) {
           setActiveFile(null); setSavedContent('');
-        } else if (changedSet.has(currentFile.path)) {
+        } else if (changedKeys.has(currentKey)) {
           if (dirty) {
-            setSaveStatus('File changed on disk');
-            setTimeout(() => setSaveStatus(''), 3000);
+            setSaveStatus('File changed on disk — unsaved editor changes kept');
+            setTimeout(() => setSaveStatus(''), 4000);
           } else {
             try {
               if (currentFile.language === 'image') {
@@ -188,11 +197,13 @@ const App: React.FC = () => {
                 setActiveFile({ name: currentFile.name, path: reloaded.filePath, content: reloaded.content, language: reloaded.language });
                 setSavedContent(reloaded.content);
               }
+              setSaveStatus('Reloaded from disk');
+              setTimeout(() => setSaveStatus(''), 2000);
             } catch { setActiveFile(null); setSavedContent(''); }
           }
         }
       }
-      if (currentDiff && changedSet.has(currentDiff.filePath)) {
+      if (currentDiff && changedKeys.has(fileKey(currentDiff.filePath))) {
         const owningId2 = activeSessionIdRef.current;
         if (owningId2) {
           try {
@@ -202,7 +213,7 @@ const App: React.FC = () => {
         }
       }
     }, 300);
-  }, [refreshFileTree, refreshGitStatus, updateSessionRuntime]);
+  }, [fileKey, refreshFileTree, refreshGitStatus, updateSessionRuntime]);
 
   const attachFsChangeListener = useCallback(() => {
     fsListenerRef.current?.();
@@ -520,6 +531,38 @@ const App: React.FC = () => {
     await refreshFileTree();
     await refreshGitStatus();
   }, [refreshFileTree, refreshGitStatus]);
+
+  const handlePaste = useCallback(async (targetDir: string) => {
+    const r = await window.electronAPI.pasteFromClipboard(targetDir);
+    if (!r.success) {
+      const msg = r.error ?? 'Paste failed.';
+      const formats = r.formats?.length ? `\nClipboard formats: ${r.formats.join(', ')}` : '';
+      alert(msg + formats);
+      return;
+    }
+    await refreshFileTree();
+    if (r.path) {
+      const ext = r.path.split('.').pop()?.toLowerCase() ?? '';
+      const imageExts = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svg']);
+      if (imageExts.has(ext)) {
+        try {
+          const asset = await window.electronAPI.getAssetDataUrl(r.path);
+          setActiveFile({ name: r.path.split(/[\\/]/).pop() ?? 'pasted', path: r.path, content: asset.dataUrl, language: 'image' });
+          setSavedContent(asset.dataUrl);
+        } catch {
+          setActiveFile({ name: r.path.split(/[\\/]/).pop() ?? 'pasted', path: r.path, content: '[Binary file — preview not available]', language: 'plaintext' });
+          setSavedContent('');
+        }
+      } else {
+        try {
+          const result = await window.electronAPI.readFile(r.path);
+          setActiveFile({ name: r.path.split(/[\\/]/).pop() ?? 'pasted', path: result.filePath, content: result.content, language: result.language });
+          setSavedContent(result.content);
+        } catch {}
+      }
+    }
+  }, [refreshFileTree]);
+
   const handleToggleFiles = useCallback(() => setFilesDrawerVisible((v) => !v), []);
 
   const showEditor = !!activeFile || !!activeDiff;
@@ -576,7 +619,7 @@ const App: React.FC = () => {
                     rootTree={rootTree} activeFilePath={activeFile?.path || ''}
                     onClose={() => setFilesDrawerVisible(false)} onFileSelect={handleFileSelect}
                     onRefreshTree={handleRefreshTree} onOpenFolder={handleOpenFolder}
-                    onCloseActiveFile={handleCloseFile} />
+                    onCloseActiveFile={handleCloseFile} onPaste={handlePaste} />
                 </div>
               )}
 

@@ -13,6 +13,7 @@ interface FilesDrawerProps {
   onRefreshTree: () => Promise<void> | void;
   onOpenFolder: () => void;
   onCloseActiveFile?: () => void;
+  onPaste?: (targetDir: string) => Promise<void>;
 }
 
 function filterTree(tree: FileNode | null, query: string): FileNode | null {
@@ -31,7 +32,7 @@ function filterTree(tree: FileNode | null, query: string): FileNode | null {
 }
 
 const FilesDrawer: React.FC<FilesDrawerProps> = ({
-  projectName, rootTree, activeFilePath, onClose, onFileSelect, onRefreshTree, onOpenFolder, onCloseActiveFile,
+  projectName, rootTree, activeFilePath, onClose, onFileSelect, onRefreshTree, onOpenFolder, onCloseActiveFile, onPaste,
 }) => {
   const [filter, setFilter] = useState('');
   const filteredTree = useMemo(() => filterTree(rootTree, filter), [rootTree, filter]);
@@ -59,7 +60,7 @@ const FilesDrawer: React.FC<FilesDrawerProps> = ({
         </div>
       ) : (
         <div className="files-drawer-section">
-          <FileTree tree={filteredTree} activeFilePath={activeFilePath} onFileSelect={onFileSelect} onRefreshTree={onRefreshTree} onCloseActiveFile={onCloseActiveFile} />
+          <FileTree tree={filteredTree} activeFilePath={activeFilePath} onFileSelect={onFileSelect} onRefreshTree={onRefreshTree} onCloseActiveFile={onCloseActiveFile} onPaste={onPaste} />
         </div>
       )}
     </div>
