@@ -45,7 +45,10 @@ const ContextMenu: React.FC<{
         <>
           <button className="file-context-item" onClick={() => doAction('newFile')}><FilePlus size={11} /><span>New File</span></button>
           <button className="file-context-item" onClick={() => doAction('newFolder')}><FolderPlus size={11} /><span>New Folder</span></button>
-          <button className="file-context-item" onClick={() => doAction('paste')}><ClipboardPaste size={11} /><span>Paste</span></button>
+          <button className="file-context-item" onClick={() => doAction('paste')}>
+            <ClipboardPaste size={11} /><span>Paste</span>
+            <span className="file-context-item-hint">screenshots &amp; copied files</span>
+          </button>
           <div className="file-context-separator" />
         </>
       )}
@@ -276,9 +279,10 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
   const contextMenuPaste = useCallback(async (targetDir: string) => {
     console.log('=== [cm-paste:start] targetDir:', targetDir);
     
-    // Log clipboard state for debugging
+    // Get debug info first
+    let debug: any = null;
     try {
-      const debug = await window.electronAPI.getClipboardDebug();
+      debug = await window.electronAPI.getClipboardDebug();
       console.log('[cm-paste:debug]', {
         platform: debug.platform,
         formats: debug.formats,
@@ -289,6 +293,17 @@ const FileTree: React.FC<FileTreeProps> = ({ tree, activeFilePath, onFileSelect,
         navigatorClipboardExists: typeof navigator?.clipboard?.read === 'function',
       });
     } catch (e) { console.log('[cm-paste:debug:error]', e); }
+
+    // Early detection: only text/uri-list with nothing usable
+    if (debug) {
+      const hasOnlyTextUriList = debug.formats.length === 1 && debug.formats[0] === 'text/uri-list';
+      const allBuffersEmpty = Object.values(debug.bufferLengths ?? {}).every((v: any) => v === 0 || v === -1);
+      if (hasOnlyTextUriList && debug.imageIsEmpty && debug.textLength === 0 && debug.htmlLength === 0 && allBuffersEmpty) {
+        console.log('[cm-paste:early] clipboard has only empty text/uri-list — nothing Electron can read');
+        alert('This clipboard does not contain image data or a file path that Electron can access. Try Ctrl+V in the Files panel, drag the image file in, or copy a downloaded image file from Explorer.');
+        return;
+      }
+    }
 
     // Try navigator.clipboard.read() for image blobs
     try {

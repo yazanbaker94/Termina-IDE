@@ -936,6 +936,14 @@ body {
   margin: 3px 6px;
 }
 
+.file-context-item-hint {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-left: auto;
+  opacity: 0.55;
+  font-style: italic;
+}
+
 /* ===== Prompt Modal ===== */
 
 .prompt-backdrop {
