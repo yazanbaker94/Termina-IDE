@@ -1,12 +1,15 @@
 
 <!-- test comment -->
 <!-- sup -->
+<!-- suppppp -->
 
 # Command Code IDE
 
 Desktop IDE for [Command Code CLI][cc] — an Electron + React + TypeScript app that wraps the CLI in a full editor environment with file explorer, Monaco code editor, xterm.js terminal, and Git support.
 
 [cc]: https://commandcode.ai/
+
+![Screenshot](pasted-image-20260614-191738.png)
 
 ## Features
 
