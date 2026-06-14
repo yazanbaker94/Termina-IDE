@@ -1,7 +1,7 @@
 
 # Command Code IDE
 
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/yazanbaker)
+<a href="https://buymeacoffee.com/yazanbaker" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 
 Desktop IDE for [Command Code CLI][cc] — an Electron + React + TypeScript app that wraps the CLI in a full editor environment with file explorer, Monaco code editor, xterm.js terminal, and Git support.
 
