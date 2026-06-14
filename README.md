@@ -68,8 +68,4 @@ The `dev` script compiles the Electron main process, starts the Vite dev server 
 │   └── icon.ico             # App icon
 ├── package.json
 └── tsconfig*.json
-
----
-
-<a href="https://buymeacoffee.com/yazanbaker"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 ```
