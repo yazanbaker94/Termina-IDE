@@ -537,7 +537,11 @@ const App: React.FC = () => {
     const r = await window.electronAPI.pasteFromClipboard(targetDir);
     console.log('[app:paste:result]', { success: r.success, error: r.error, path: r.path, paths: r.paths, count: r.count, formats: r.formats });
     if (!r.success) {
-      const msg = 'Could not paste clipboard content. Try dragging the file into the Files panel or using Ctrl+V while the panel is focused.';
+      // Check if it's the empty text/uri-list case
+      const isUriListOnly = r.formats?.length === 1 && r.formats[0] === 'text/uri-list';
+      const msg = isUriListOnly
+        ? 'Windows did not expose copied file paths to this app. Use Import File or drag/drop instead.'
+        : 'Could not paste clipboard content. Use Import File or drag files into the panel.';
       console.warn('[app:paste:fail]', r.error);
       alert(msg);
       return;

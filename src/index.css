@@ -805,6 +805,13 @@ body {
   white-space: nowrap;
 }
 
+.file-item.drag-over,
+.tree-folder.drag-over {
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+  background: var(--accent-dim);
+}
+
 .file-item:hover,
 .tree-folder:hover {
   background: var(--bg-hover);

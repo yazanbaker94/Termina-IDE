@@ -48,7 +48,7 @@ const ContextMenu: React.FC<{
           <button className="file-context-item" onClick={() => doAction('importFiles')}><Upload size={11} /><span>Import Files...</span></button>
           <button className="file-context-item" onClick={() => doAction('paste')}>
             <ClipboardPaste size={11} /><span>Paste</span>
-            <span className="file-context-item-hint">screenshots &amp; copied files</span>
+            <span className="file-context-item-hint">screenshots &amp; clipboard data</span>
           </button>
           <div className="file-context-separator" />
         </>
