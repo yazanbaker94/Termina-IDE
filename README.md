@@ -1,5 +1,5 @@
 
-# Command Code IDE
+# Unofficial Command Code IDE - Cli + IDE = Clide
 
 <a href="https://buymeacoffee.com/yazanbaker" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 
