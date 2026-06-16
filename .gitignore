@@ -7,4 +7,6 @@ release/
 Thumbs.db
 coverage/
 
+# Per-project runtime data (agent clipboard images, session scratch, etc.)
+.termina/
 .commandcode/

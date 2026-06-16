@@ -146,4 +146,18 @@ export interface ElectronAPI {
   writeClipboardText: (text: string) => Promise<{ success: boolean; error?: string }>;
   writePastedBuffer: (args: { targetDir: string; filename?: string; mimeType?: string; bytes: number[] }) => Promise<{ success: boolean; error?: string; path?: string; paths?: string[]; count?: number; items?: { path: string; name: string; type: 'file' | 'directory' }[] }>;
   statFile: (filePath: string) => Promise<{ exists: boolean; type?: 'file' | 'directory'; mtimeMs?: number; size?: number }>;
+  saveAgentImageAttachment: (args: { bytes: number[]; mimeType?: string; filename?: string; projectRoot?: string | null }) => Promise<AgentImageAttachmentResult>;
+  saveDroppedImageAttachment: (args: { sourcePath: string; projectRoot?: string | null }) => Promise<AgentImageAttachmentResult>;
+  readClipboardImageForAgent: (args?: { projectRoot?: string | null }) => Promise<AgentImageAttachmentResult>;
+}
+
+export interface AgentImageAttachmentResult {
+  success: boolean;
+  absolutePath?: string;
+  relativePath?: string;
+  /** The text that should be inserted into the CLI input, e.g. "@.termina/clipboard/pasted-...png" */
+  agentRef?: string;
+  /** A base64 data URL suitable for rendering in a <img> preview chip. */
+  previewDataUrl?: string;
+  error?: string;
 }

@@ -2,9 +2,10 @@ import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { AlertTriangle, FilePlus, FileEdit, FileMinus, ChevronDown, ChevronRight, X, ClipboardPaste, Copy } from 'lucide-react';
-import { FileChangeEvent, AgentStatus } from '../types';
+import { FileChangeEvent, AgentStatus, AgentImageAttachmentResult } from '../types';
 import { cliDebug } from '../debug/cliDebug';
 import { extractTitleFromPrompt, isDefaultLabel, buildContextualTitle } from '../utils/sessionNaming';
+import { AgentImagePreviewChip } from './AgentImagePreviewChip';
 
 interface AgentPanelProps {
   sessionId: string;
@@ -18,6 +19,8 @@ interface AgentPanelProps {
   dockTransitioningRef?: React.MutableRefObject<boolean>;
   hasProject: boolean;
   sessionLabel: string | null;
+  /** Absolute path of the project root, used to resolve image save location. */
+  projectRoot?: string | null;
   onRenameSession: (sessionId: string, newLabel: string) => void;
   onWrite: (input: string) => void;
   onChangedFileClick: (evt: FileChangeEvent) => void;
@@ -49,6 +52,36 @@ function normalizeTerminalPaste(text: string): string {
   return s;
 }
 
+const ACCEPTED_IMAGE_MIME = new Set([
+  'image/png', 'image/jpeg', 'image/jpg', 'image/webp',
+  'image/gif', 'image/bmp', 'image/x-icon', 'image/svg+xml', 'image/ico',
+]);
+
+const ACCEPTED_IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.ico', '.svg']);
+
+function isImageFile(file: File): boolean {
+  if (file.type && ACCEPTED_IMAGE_MIME.has(file.type.toLowerCase())) return true;
+  const name = (file.name || '').toLowerCase();
+  const idx = name.lastIndexOf('.');
+  if (idx === -1) return false;
+  return ACCEPTED_IMAGE_EXT.has(name.slice(idx));
+}
+
+function hasFilesInDataTransfer(dt: DataTransfer | null): boolean {
+  if (!dt) return false;
+  // The 'Files' type is set when the user is dragging files from the OS
+  // or from another app. We don't need to inspect the list to enable the
+  // drop zone — just knowing files are present is enough.
+  if (dt.types && Array.from(dt.types).includes('Files')) return true;
+  // Some browsers expose file count directly.
+  if (typeof dt.items !== 'undefined' && dt.items.length > 0) {
+    for (let i = 0; i < dt.items.length; i++) {
+      if (dt.items[i]?.kind === 'file') return true;
+    }
+  }
+  return false;
+}
+
 const AgentPanel: React.FC<AgentPanelProps> = ({
   sessionId,
   status,
@@ -61,6 +94,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   dockTransitioningRef,
   hasProject,
   sessionLabel,
+  projectRoot,
   onRenameSession,
   terminalRef: externalTerminalRef,
   onWrite,
@@ -74,9 +108,18 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   const resizeRafRef = useRef<number | null>(null);
   const [changesExpanded, setChangesExpanded] = useState(false);
   const [termMenu, setTermMenu] = useState<{ x: number; y: number } | null>(null);
+  const [imageAttachments, setImageAttachments] = useState<AgentImageAttachmentResult[]>([]);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const inputLineRef = useRef('');
   const renamedRef = useRef(false);
   const lastPasteRef = useRef<{ text: string; at: number } | null>(null);
+  // Tracks recent image-attachment attempts to suppress double-fires from
+  // both the DOM paste handler and the keyboard paste fallback running back
+  // to back. Same pattern as lastPasteRef for text pastes.
+  const lastImageAttachRef = useRef<{ signature: string; at: number } | null>(null);
+  const imageErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dragCounterRef = useRef(0);
 
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
@@ -201,9 +244,141 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     onWrite(data);
   }, [onWrite, recordTerminalInputForTitle]);
 
+  // --- Image attachment helpers ---
+  // These are defined in terms of refs that point to the latest handler
+  // implementations. This lets the DOM paste / keyboard paste / drop
+  // handlers (which are defined earlier in the file and reference these
+  // via the refs) stay stable across re-renders.
+
+  const showImageError = useCallback((msg: string) => {
+    setImageError(msg);
+    if (imageErrorTimerRef.current) clearTimeout(imageErrorTimerRef.current);
+    imageErrorTimerRef.current = setTimeout(() => setImageError(null), 4000);
+  }, []);
+
+  const attachResult = useCallback(async (result: AgentImageAttachmentResult, dedupeKey: string) => {
+    if (!result.success || !result.agentRef) {
+      showImageError(result.error || 'Could not attach image.');
+      return;
+    }
+    // Dedupe identical recent attachments (avoids double-fire from DOM +
+    // keyboard paste handlers both triggering on the same paste).
+    const now = Date.now();
+    const last = lastImageAttachRef.current;
+    if (last && last.signature === dedupeKey && now - last.at < 800) {
+      return;
+    }
+    lastImageAttachRef.current = { signature: dedupeKey, at: now };
+
+    setImageAttachments((prev) => {
+      // Don't add a duplicate of the same absolute path.
+      if (prev.some((p) => p.absolutePath && p.absolutePath === result.absolutePath)) {
+        return prev;
+      }
+      return [...prev, result];
+    });
+    // Insert the @path into the active CLI input. Use the same code path
+    // as text paste so the agent sees exactly the @path string with no
+    // base64 or structured wrapper. We do NOT auto-submit.
+    sendTerminalInput(result.agentRef, 'image-attach');
+    cliDebug.log('agent:imageAttached', { agentRef: result.agentRef, dedupeKey });
+    focusTerminal();
+  }, [sendTerminalInput, showImageError, focusTerminal]);
+
+  // File from DOM paste: read as ArrayBuffer, send to main for save.
+  const attachPastedImageFileRef = useRef<((file: File, dedupeKey: string) => void) | null>(null);
+  const attachPastedImageFile = useCallback(async (file: File, dedupeKey: string) => {
+    try {
+      if (file.size > 20 * 1024 * 1024) {
+        showImageError('Image is over 20 MB. Attachments are limited to 20 MB.');
+        return;
+      }
+      const buf = new Uint8Array(await file.arrayBuffer());
+      const result = await window.electronAPI.saveAgentImageAttachment({
+        bytes: Array.from(buf),
+        mimeType: file.type || 'image/png',
+        filename: file.name,
+        projectRoot: projectRoot,
+      });
+      await attachResult(result, dedupeKey);
+    } catch (err: any) {
+      showImageError(err?.message || 'Could not read pasted image.');
+    }
+  }, [attachResult, showImageError, projectRoot]);
+  attachPastedImageFileRef.current = attachPastedImageFile;
+
+  // File from drag-and-drop: hand the source path to main for copying.
+  const attachDroppedImageFile = useCallback(async (file: File, dedupeKey: string) => {
+    try {
+      if (file.size > 20 * 1024 * 1024) {
+        showImageError('Image is over 20 MB. Attachments are limited to 20 MB.');
+        return;
+      }
+      // Use the dropped file's path when available (Electron exposes
+      // file.path on dropped files). The main process re-reads the file
+      // and copies it into .termina/clipboard/.
+      const sourcePath = (file as any).path || '';
+      if (!sourcePath) {
+        // Fallback: read bytes and re-save via saveAgentImageAttachment.
+        const buf = new Uint8Array(await file.arrayBuffer());
+        const result = await window.electronAPI.saveAgentImageAttachment({
+          bytes: Array.from(buf),
+          mimeType: file.type || 'image/png',
+          filename: file.name,
+          projectRoot: projectRoot,
+        });
+        await attachResult(result, dedupeKey);
+        return;
+      }
+      const result = await window.electronAPI.saveDroppedImageAttachment({
+        sourcePath,
+        projectRoot: projectRoot,
+      });
+      await attachResult(result, dedupeKey);
+    } catch (err: any) {
+      showImageError(err?.message || 'Could not attach dropped image.');
+    }
+  }, [attachResult, showImageError, projectRoot]);
+
+  // Native (system) clipboard image — used by Ctrl/Cmd+V fallback when
+  // no text is on the system clipboard.
+  const readNativeClipboardImage = useCallback(async () => {
+    try {
+      const result = await window.electronAPI.readClipboardImageForAgent({ projectRoot: projectRoot });
+      await attachResult(result, 'native-clipboard');
+    } catch (err: any) {
+      showImageError(err?.message || 'Could not read clipboard image.');
+    }
+  }, [attachResult, showImageError, projectRoot]);
+
+  const removeImageAttachment = useCallback((idx: number) => {
+    setImageAttachments((prev) => prev.filter((_, i) => i !== idx));
+  }, []);
+
   const handleTerminalPaste = useCallback((e: React.ClipboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
+
+    // 1) Check for image/* items in the clipboard. We do this FIRST so
+    //    that pasting a screenshot or "Copy Image" never falls through
+    //    to the text path. The clipboard may carry both an image and a
+    //    text/uri-list of file paths; in that case we still treat it as
+    //    an image paste because the user clearly meant the image.
+    const items = e.clipboardData?.items;
+    if (items && items.length > 0) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item && item.kind === 'file' && item.type && item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            void attachPastedImageFileRef.current?.(file, 'dom-paste');
+            return;
+          }
+        }
+      }
+    }
+
+    // 2) No image — fall back to the original text path.
     const text = e.clipboardData.getData('text/plain');
     if (!text) return;
     const normalized = normalizeTerminalPaste(text);
@@ -222,12 +397,17 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     if (!text) {
       try { text = await window.electronAPI.readClipboardText(); } catch {}
     }
-    if (!text) return;
+    if (!text) {
+      // No text on the system clipboard — try a native clipboard image
+      // (screenshot tool, browser "Copy Image", etc.).
+      await readNativeClipboardImage();
+      return;
+    }
     const normalized = normalizeTerminalPaste(text);
     if (!normalized) return;
     sendTerminalInput(normalized, 'keyboard-paste');
     focusTerminal();
-  }, [sendTerminalInput, focusTerminal]);
+  }, [sendTerminalInput, focusTerminal, readNativeClipboardImage]);
 
   const performTerminalCopy = useCallback(async () => {
     if (!terminalRef.current) return;
@@ -247,12 +427,16 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     if (!text) {
       try { text = await window.electronAPI.readClipboardText(); } catch {}
     }
-    if (!text) return;
+    if (!text) {
+      // No text on the clipboard — try a native clipboard image instead.
+      await readNativeClipboardImage();
+      return;
+    }
     const normalized = normalizeTerminalPaste(text);
     if (!normalized) return;
     sendTerminalInput(normalized, 'context-menu-paste');
     focusTerminal();
-  }, [sendTerminalInput, focusTerminal]);
+  }, [sendTerminalInput, focusTerminal, readNativeClipboardImage]);
 
   // Refs to the latest handler functions so initTerminal stays stable
   const performTerminalPasteRef = useRef(performTerminalPaste);
@@ -501,12 +685,67 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
         </div>
       )}
 
-      <div className="agent-terminal-container"
+      <div
+        className={`agent-terminal-container${isDragOver ? ' is-drag-over' : ''}`}
         ref={containerRef}
         onClick={focusTerminal}
         onContextMenu={handleTerminalContextMenu}
         onPasteCapture={handleTerminalPaste}
-        tabIndex={0} />
+        onDragEnter={(e) => {
+          if (!hasFilesInDataTransfer(e.dataTransfer)) return;
+          e.preventDefault();
+          dragCounterRef.current += 1;
+          setIsDragOver(true);
+        }}
+        onDragOver={(e) => {
+          if (!hasFilesInDataTransfer(e.dataTransfer)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+        }}
+        onDragLeave={(e) => {
+          if (!hasFilesInDataTransfer(e.dataTransfer)) return;
+          dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+          if (dragCounterRef.current === 0) setIsDragOver(false);
+        }}
+        onDrop={(e) => {
+          dragCounterRef.current = 0;
+          setIsDragOver(false);
+          if (!e.dataTransfer?.files || e.dataTransfer.files.length === 0) return;
+          e.preventDefault();
+          const files = Array.from(e.dataTransfer.files);
+          const imageFiles = files.filter(isImageFile);
+          if (imageFiles.length === 0) {
+            showImageError('Only image files can be attached (png, jpg, jpeg, webp, gif, bmp, svg).');
+            return;
+          }
+          for (const f of imageFiles) {
+            void attachDroppedImageFile(f, `drop:${f.name}:${f.size}:${f.lastModified}`);
+          }
+          focusTerminal();
+        }}
+        tabIndex={0}
+      >
+        {imageError && (
+          <div className="agent-error-banner" role="alert">
+            <AlertTriangle size={13} />
+            <span>{imageError}</span>
+          </div>
+        )}
+      </div>
+
+      {imageAttachments.length > 0 && (
+        <div className="agent-image-attachments" data-testid="agent-image-attachments">
+          {imageAttachments.map((att, idx) => (
+            <AgentImagePreviewChip
+              key={(att.absolutePath || att.agentRef || '') + idx}
+              agentRef={att.agentRef || ''}
+              previewDataUrl={att.previewDataUrl}
+              fileName={att.relativePath?.split(/[\\/]/).pop()}
+              onRemove={() => removeImageAttachment(idx)}
+            />
+          ))}
+        </div>
+      )}
 
       {termMenu && (
         <div className="term-context-menu" style={{ position: 'fixed', left: termMenu.x, top: termMenu.y, zIndex: 101 }}

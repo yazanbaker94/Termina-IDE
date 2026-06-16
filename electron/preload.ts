@@ -54,4 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
   writePastedBuffer: (args: { targetDir: string; filename?: string; mimeType?: string; bytes: number[] }) => ipcRenderer.invoke('fs:writePastedBuffer', args),
   statFile: (filePath: string) => ipcRenderer.invoke('fs:statFile', filePath),
+  saveAgentImageAttachment: (args: { bytes: number[]; mimeType?: string; filename?: string; projectRoot?: string | null }) => ipcRenderer.invoke('agent:saveImageAttachment', args),
+  saveDroppedImageAttachment: (args: { sourcePath: string; projectRoot?: string | null }) => ipcRenderer.invoke('agent:saveDroppedImageAttachment', args),
+  readClipboardImageForAgent: (args?: { projectRoot?: string | null }) => ipcRenderer.invoke('agent:readClipboardImageAttachment', args ?? {}),
 });

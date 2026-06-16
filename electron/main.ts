@@ -83,6 +83,121 @@ function saveNativeImage(targetDir: string): { success: boolean; path?: string }
   return { success: true, path: filePath };
 }
 
+// Maximum allowed image attachment size (20 MB) to avoid OOM or runaway storage.
+const AGENT_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+
+// Acceptable image MIME types and their canonical extension.
+const AGENT_IMAGE_MIME_TO_EXT: Record<string, string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'image/bmp': '.bmp',
+  'image/x-icon': '.ico',
+  'image/svg+xml': '.svg',
+  'image/ico': '.ico',
+};
+
+const AGENT_IMAGE_ACCEPTED_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.ico', '.svg']);
+
+function sanitizeImageFilename(name: string): string {
+  // Strip directory traversal and reserved characters. Keep it ASCII-safe.
+  let s = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+  s = s.replace(/^\.+/, '');
+  s = s.replace(/\s+/g, '-');
+  if (s.length > 100) s = s.slice(0, 100);
+  if (!s) s = 'image';
+  return s;
+}
+
+function buildPastedImageBasename(prefix: string, hash: string): string {
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+  return `${prefix}-${stamp}-${hash}`;
+}
+
+function shortHash(bytes: Buffer): string {
+  // FNV-1a 32-bit, hex-encoded (6 chars). Deterministic and dependency-free.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < bytes.length; i++) {
+    h ^= bytes[i];
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return h.toString(16).slice(0, 6);
+}
+
+/**
+ * Resolve the directory where agent image attachments should be saved.
+ * - If a project root is open, use <rootPath>/.termina/clipboard/ (created on demand).
+ * - Otherwise fall back to <osTemp>/termina/clipboard/ so the feature still works.
+ * Returns { dir, isProjectRelative }.
+ */
+function resolveAgentClipboardDir(): { dir: string; isProjectRelative: boolean } {
+  if (rootPath) {
+    const dir = path.join(rootPath, '.termina', 'clipboard');
+    return { dir, isProjectRelative: true };
+  }
+  const dir = path.join(app.getPath('temp'), 'termina', 'clipboard');
+  return { dir, isProjectRelative: false };
+}
+
+function ensureAgentClipboardDir(): { dir: string; isProjectRelative: boolean; error?: string } {
+  const r = resolveAgentClipboardDir();
+  try {
+    fs.mkdirSync(r.dir, { recursive: true });
+  } catch (err: any) {
+    return { ...r, error: `Could not create clipboard directory: ${err.message}` };
+  }
+  return r;
+}
+
+function bufferToDataUrl(buffer: Buffer, mime: string): string {
+  return `data:${mime};base64,${buffer.toString('base64')}`;
+}
+
+function extensionForMime(mime: string): string {
+  return AGENT_IMAGE_MIME_TO_EXT[mime.toLowerCase()] || '.png';
+}
+
+function readAgentClipboardImage(): { success: boolean; buffer?: Buffer; mime?: string; error?: string } {
+  try {
+    // 1) Native bitmap (screenshots, "Copy Image" from browsers, etc.)
+    const img = clipboard.readImage();
+    if (!img.isEmpty()) {
+      const buf = img.toPNG();
+      return { success: true, buffer: Buffer.from(buf), mime: 'image/png' };
+    }
+
+    // 2) Raw image/* format buffers
+    const formats = clipboard.availableFormats('clipboard');
+    const candidates: { fmt: string; mime: string }[] = [
+      { fmt: 'image/png', mime: 'image/png' },
+      { fmt: 'image/jpeg', mime: 'image/jpeg' },
+      { fmt: 'image/webp', mime: 'image/webp' },
+      { fmt: 'image/gif', mime: 'image/gif' },
+      { fmt: 'image/bmp', mime: 'image/bmp' },
+      { fmt: 'public.png', mime: 'image/png' },
+      { fmt: 'public.jpeg', mime: 'image/jpeg' },
+      { fmt: 'PNG', mime: 'image/png' },
+    ];
+    for (const { fmt, mime } of candidates) {
+      if (formats.includes(fmt)) {
+        try {
+          const buf = clipboard.readBuffer(fmt);
+          if (buf && buf.length > 0) {
+            return { success: true, buffer: Buffer.from(buf), mime };
+          }
+        } catch {}
+      }
+    }
+
+    return { success: false, error: 'No image on the system clipboard.' };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 function parseFileUri(uri: string): string | null {
   try {
     let normalized = uri.trim();
@@ -974,6 +1089,181 @@ function setupIPC() {
     } catch {
       return { success: false };
     }
+  });
+
+  ipcMain.handle('agent:saveImageAttachment', async (_event, args: { bytes: number[]; mimeType?: string; filename?: string; projectRoot?: string | null }) => {
+    try {
+      if (!args || !Array.isArray(args.bytes) || args.bytes.length === 0) {
+        return { success: false, error: 'No image data provided.' };
+      }
+      if (args.bytes.length > AGENT_IMAGE_MAX_BYTES) {
+        return { success: false, error: 'Image is over 20 MB. Attachments are limited to 20 MB.' };
+      }
+
+      const buffer = Buffer.from(args.bytes);
+      if (buffer.length === 0) {
+        return { success: false, error: 'Image is empty.' };
+      }
+
+      const mime = (args.mimeType || 'image/png').toLowerCase();
+      let ext = extensionForMime(mime);
+      // If caller passed a filename with a recognized image extension, prefer that.
+      if (args.filename) {
+        const fext = path.extname(args.filename).toLowerCase();
+        if (AGENT_IMAGE_ACCEPTED_EXTS.has(fext)) {
+          ext = fext === '.jpeg' ? '.jpg' : fext;
+        }
+      }
+      if (!AGENT_IMAGE_ACCEPTED_EXTS.has(ext)) {
+        return { success: false, error: `Unsupported image type: ${ext}` };
+      }
+
+      // If a projectRoot is provided (and we don't already have one), use it.
+      const projectRoot = args.projectRoot && String(args.projectRoot).trim() ? path.resolve(args.projectRoot) : null;
+      const useRoot = projectRoot || rootPath;
+      const dirInfo = useRoot
+        ? { dir: path.join(useRoot, '.termina', 'clipboard'), isProjectRelative: true }
+        : { dir: path.join(app.getPath('temp'), 'termina', 'clipboard'), isProjectRelative: false };
+
+      try {
+        fs.mkdirSync(dirInfo.dir, { recursive: true });
+      } catch (err: any) {
+        return { success: false, error: `Could not create clipboard directory: ${err.message}` };
+      }
+
+      const safeBase = sanitizeImageFilename(
+        args.filename ? path.basename(args.filename, path.extname(args.filename)) : ''
+      );
+      const baseName = buildPastedImageBasename(safeBase || 'pasted', shortHash(buffer));
+      const dest = uniquePath(dirInfo.dir, baseName + ext);
+      fs.writeFileSync(dest, buffer);
+
+      const relativePath = dirInfo.isProjectRelative
+        ? path.posix.join('.termina', 'clipboard', path.basename(dest))
+        : dest;
+      const agentRef = '@' + relativePath.replace(/\\/g, '/');
+      const previewDataUrl = bufferToDataUrl(buffer, mime.startsWith('image/') ? mime : 'image/' + mime.replace(/^image\/?/, ''));
+
+      return {
+        success: true,
+        absolutePath: dest,
+        relativePath,
+        agentRef,
+        previewDataUrl,
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('agent:saveDroppedImageAttachment', async (_event, args: { sourcePath: string; projectRoot?: string | null }) => {
+    try {
+      if (!args || !args.sourcePath) {
+        return { success: false, error: 'No file path provided.' };
+      }
+      const resolved = path.resolve(args.sourcePath);
+      if (!fs.existsSync(resolved)) {
+        return { success: false, error: 'File does not exist.' };
+      }
+      const ext = path.extname(resolved).toLowerCase();
+      if (!AGENT_IMAGE_ACCEPTED_EXTS.has(ext)) {
+        return { success: false, error: `Unsupported file type: ${ext || '(none)'}` };
+      }
+      const stat = fs.statSync(resolved);
+      if (stat.size > AGENT_IMAGE_MAX_BYTES) {
+        return { success: false, error: 'Image is over 20 MB. Attachments are limited to 20 MB.' };
+      }
+      const buffer = fs.readFileSync(resolved);
+      if (buffer.length === 0) {
+        return { success: false, error: 'File is empty.' };
+      }
+      const mime = AGENT_IMAGE_MIME_TO_EXT[ext === '.jpeg' ? '.jpg' : ext] || 'image/png';
+
+      // Restrict source files to be inside the project root when one is open.
+      if (rootPath) {
+        const lowerResolved = resolved.toLowerCase();
+        const lowerRoot = path.resolve(rootPath).toLowerCase();
+        if (!lowerResolved.startsWith(lowerRoot)) {
+          return { success: false, error: 'Dropped file is outside the workspace folder.' };
+        }
+      }
+
+      const projectRoot = args.projectRoot && String(args.projectRoot).trim() ? path.resolve(args.projectRoot) : null;
+      const useRoot = projectRoot || rootPath;
+      const dirInfo = useRoot
+        ? { dir: path.join(useRoot, '.termina', 'clipboard'), isProjectRelative: true }
+        : { dir: path.join(app.getPath('temp'), 'termina', 'clipboard'), isProjectRelative: false };
+
+      try {
+        fs.mkdirSync(dirInfo.dir, { recursive: true });
+      } catch (err: any) {
+        return { success: false, error: `Could not create clipboard directory: ${err.message}` };
+      }
+
+      const safeBase = sanitizeImageFilename(path.basename(resolved, ext));
+      const baseName = buildPastedImageBasename(safeBase || 'pasted', shortHash(buffer));
+      const dest = uniquePath(dirInfo.dir, baseName + ext);
+      fs.writeFileSync(dest, buffer);
+
+      const relativePath = dirInfo.isProjectRelative
+        ? path.posix.join('.termina', 'clipboard', path.basename(dest))
+        : dest;
+      const agentRef = '@' + relativePath.replace(/\\/g, '/');
+      const previewDataUrl = bufferToDataUrl(buffer, mime);
+
+      return {
+        success: true,
+        absolutePath: dest,
+        relativePath,
+        agentRef,
+        previewDataUrl,
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('agent:readClipboardImageAttachment', async (_event, args: { projectRoot?: string | null } | undefined) => {
+    const result = readAgentClipboardImage();
+    if (!result.success || !result.buffer) {
+      return { success: false, error: result.error };
+    }
+    const buffer = result.buffer;
+    if (buffer.length > AGENT_IMAGE_MAX_BYTES) {
+      return { success: false, error: 'Clipboard image is over 20 MB.' };
+    }
+    const mime = result.mime || 'image/png';
+    const ext = extensionForMime(mime);
+
+    const projectRoot = args && args.projectRoot && String(args.projectRoot).trim() ? path.resolve(args.projectRoot) : null;
+    const useRoot = projectRoot || rootPath;
+    const dirInfo = useRoot
+      ? { dir: path.join(useRoot, '.termina', 'clipboard'), isProjectRelative: true }
+      : { dir: path.join(app.getPath('temp'), 'termina', 'clipboard'), isProjectRelative: false };
+
+    try {
+      fs.mkdirSync(dirInfo.dir, { recursive: true });
+    } catch (err: any) {
+      return { success: false, error: `Could not create clipboard directory: ${err.message}` };
+    }
+
+    const baseName = buildPastedImageBasename('pasted', shortHash(buffer));
+    const dest = uniquePath(dirInfo.dir, baseName + ext);
+    fs.writeFileSync(dest, buffer);
+
+    const relativePath = dirInfo.isProjectRelative
+      ? path.posix.join('.termina', 'clipboard', path.basename(dest))
+      : dest;
+    const agentRef = '@' + relativePath.replace(/\\/g, '/');
+    const previewDataUrl = bufferToDataUrl(buffer, mime);
+
+    return {
+      success: true,
+      absolutePath: dest,
+      relativePath,
+      agentRef,
+      previewDataUrl,
+    };
   });
 
   ipcMain.handle('fs:getFileTree', async () => {

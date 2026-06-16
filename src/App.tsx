@@ -827,6 +827,7 @@ const App: React.FC = () => {
                 resizeSignal={dockResizeTick}
                 dockTransitioningRef={dockTransitioningRef}
                 hasProject={hasProject} sessionLabel={activeSession?.label ?? null}
+                projectRoot={rootPath}
                 onRenameSession={handleRenameSession}
                 onWrite={(input) => handleWriteAgent(activeSessionId, input)}
                 onChangedFileClick={handleChangedFileClick}

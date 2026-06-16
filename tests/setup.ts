@@ -52,7 +52,21 @@ vi.mock('@xterm/xterm', () => {
       loadAddon = vi.fn();
       onData = vi.fn();
       getSelection = vi.fn(() => '');
-      attachCustomKeyEventHandler = vi.fn();
+      // The custom key event handler is what the AgentPanel uses to
+      // intercept Ctrl+V. In real xterm, the handler is called when a
+      // key event fires on xterm's internal input. In our mock we store
+      // the handler and expose a helper to invoke it, so tests can
+      // simulate Ctrl+V by calling the stored handler directly.
+      _keyHandler: ((e: KeyboardEvent) => boolean) | null = null;
+      attachCustomKeyEventHandler = vi.fn((handler: (e: KeyboardEvent) => boolean) => {
+        this._keyHandler = handler;
+      });
+      // Test helper: dispatch a key event through the custom handler.
+      // Returns true if the handler consumed the event, false otherwise.
+      _dispatchKeyForTest(e: KeyboardEvent): boolean {
+        if (!this._keyHandler) return true;
+        return this._keyHandler(e);
+      }
       constructor() {
         mockState.terminals.push(this);
       }
@@ -128,4 +142,30 @@ const noop = () => {};
   writeClipboardText: vi.fn(async () => ({ success: true })),
   writePastedBuffer: vi.fn(async () => ({ success: true })),
   statFile: vi.fn(async () => ({ exists: false })),
+  saveAgentImageAttachment: vi.fn(async (args: any) => {
+    // Test-friendly: synthesize a successful result with a fake path so
+    // components can exercise the happy path without an Electron main.
+    const bytes: number[] = Array.isArray(args?.bytes) ? args.bytes : [];
+    const ext = args?.filename ? (args.filename.split('.').pop() || 'png').toLowerCase() : 'png';
+    const fileName = `pasted-test-${bytes.length}.${ext}`;
+    return {
+      success: true,
+      absolutePath: `/tmp/.termina/clipboard/${fileName}`,
+      relativePath: `.termina/clipboard/${fileName}`,
+      agentRef: `@.termina/clipboard/${fileName}`,
+      previewDataUrl: 'data:image/png;base64,',
+    };
+  }),
+  saveDroppedImageAttachment: vi.fn(async (args: any) => {
+    const sourcePath = String(args?.sourcePath || '');
+    const fileName = sourcePath.split(/[\\/]/).pop() || 'dropped.png';
+    return {
+      success: true,
+      absolutePath: `/tmp/.termina/clipboard/${fileName}`,
+      relativePath: `.termina/clipboard/${fileName}`,
+      agentRef: `@.termina/clipboard/${fileName}`,
+      previewDataUrl: 'data:image/png;base64,',
+    };
+  }),
+  readClipboardImageForAgent: vi.fn(async () => ({ success: false, error: 'No image on the system clipboard.' })),
 };

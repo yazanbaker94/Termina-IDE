@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Image paste + drag/drop for the Agent terminal
+- Users can now paste or drag an image into the agent CLI terminal. The image is saved to `<projectRoot>/.termina/clipboard/` (or `<osTemp>/termina/clipboard/` when no project is open) and an `@path` reference is inserted into the active CLI input line. Vision-capable models see the image; text-only models can ignore the path or fail naturally — the agent protocol is unchanged.
+- **Terminal stays text-only.** No sixel, no iTerm2 image protocol, no base64 inline. The image is represented by a short `@relative/path/to/file.png` token that any agent already understands.
+- **Preview chip.** A compact React overlay above the terminal shows a thumbnail + filename + remove button for each attached image. Click the thumbnail (or the magnifier) to open a full-size lightbox. The X button detaches the image from the current input.
+- **Three entry points, same flow:**
+  - DOM paste (`Ctrl+V` in the terminal): detects `image/*` items first; if none, falls back to the original text paste behavior.
+  - Keyboard shortcut (`Ctrl+V` via xterm's custom key handler): if the system clipboard has no text, falls back to the native clipboard image.
+  - Drag-and-drop: any image file (png, jpg, jpeg, webp, gif, bmp, ico, svg) onto the terminal container is saved and inserted as `@path`. Non-image drops show a small warning and are ignored.
+- **Do not auto-submit.** The user presses Enter themselves after reviewing the chip and any surrounding text.
+- **Filename format:** `pasted-YYYYMMDD-HHMMSS-<6charhash>.<ext>` (e.g. `pasted-20260616-174233-a1b2c3.png`). Dropped files preserve their original extension; native clipboard bitmaps are saved as `.png`.
+- **Safety:** 20 MB hard cap with a user-visible error; filename sanitization; source files restricted to the workspace folder when one is open.
+- **New dedicated IPC channels** (not piggybacked on the file-tree paste): `agent:saveImageAttachment`, `agent:saveDroppedImageAttachment`, `agent:readClipboardImageAttachment`. Exposed as `window.electronAPI.saveAgentImageAttachment`, `saveDroppedImageAttachment`, `readClipboardImageForAgent`.
+- **Duplicate paste prevention:** a `lastImageAttachRef` debounces identical attachment signatures within 800ms, so a DOM paste and a keyboard paste firing back-to-back don't double-attach.
+- **Tests:** 21 new tests across 2 new test files (`tests/agentImageAttachment.test.tsx` and `tests/projectLayout.test.ts`) covering: DOM image paste, text fallback, Ctrl+V text-vs-image priority, drag/drop image, non-image drop rejection, drag-over visual state, duplicate prevention, preview chip rendering, `.gitignore` excludes `.termina/`, and source-shape checks that confirm no base64 is ever sent to the terminal and the new IPC channels are wired up.
+- **Files added/changed:** `src/components/AgentImagePreviewChip.tsx` (new chip component), `src/components/AgentPanel.tsx` (paste + drop + chip integration), `electron/main.ts` (IPC handlers + image helpers), `electron/preload.ts` (IPC exposure), `src/types/index.ts` (ElectronAPI + AgentImageAttachmentResult), `src/index.css` (chip/drag styles), `.gitignore` (`.termina/`).
+
+
 ### Smoothness fixes (terminal no longer twitches when opening side panel / code files)
 - xterm `initTerminal` no longer depends on `terminalBuffer`, so the terminal is not recreated on every data event. Latest buffer is read via `terminalBufferRef` on first init.
 - xterm `syncResize` coalesces calls through `requestAnimationFrame` to absorb the burst of ResizeObserver fires that happens when the right-dock opens/closes.
