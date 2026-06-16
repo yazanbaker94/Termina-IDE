@@ -89,9 +89,12 @@ const SessionRail: React.FC<SessionRailProps> = ({
 
           return (
             <div key={p.id} className="session-project-group" onContextMenu={(e) => { e.preventDefault(); setContextProjectId(p.id); }}>
-              <button
+              <div
+                role="button"
+                tabIndex={0}
                 className={`session-project-row ${isActiveProject ? 'active' : ''}`}
                 onClick={() => { onSelectProject(p); if (!isExpanded) setExpandedProjectIds((prev) => new Set(prev).add(p.id)); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectProject(p); } }}
                 title={p.name}
               >
                 <span
@@ -110,7 +113,7 @@ const SessionRail: React.FC<SessionRailProps> = ({
                 >
                   <MoreHorizontal size={12} />
                 </button>
-              </button>
+              </div>
 
               {contextProjectId === p.id && (
                 <div className="session-context-menu" onClick={(e) => e.stopPropagation()}>

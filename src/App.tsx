@@ -7,8 +7,11 @@ import DiffViewer from './components/DiffViewer';
 import AgentPanel from './components/AgentPanel';
 import FilesDrawer from './components/FilesDrawer';
 import BottomBar from './components/BottomBar';
+import { CliDebugOverlay } from './debug/CliDebugOverlay';
+import { cliDebug } from './debug/cliDebug';
 import { loadAppData, saveAppData, generateId, StoredProject, StoredSession, AppData } from './data/store';
 import { FileNode, FileState, OpenFolderResult, FileChangeEvent, FileDiff, GitStatus, SessionRuntimeState } from './types';
+import { buildContextualTitle, deduplicateTitle, extractTitleFromAgentResponse, extractTitleFromPrompt, isDefaultLabel } from './utils/sessionNaming';
 
 const MAX_TERMINAL_BUFFER = 200000;
 
@@ -25,6 +28,7 @@ const defaultRuntime = (): SessionRuntimeState => ({
 });
 
 const App: React.FC = () => {
+  cliDebug.init();
   const [appData, setAppData] = useState<AppData>(loadAppData);
   const { projects, activeProjectId } = appData;
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
@@ -44,8 +48,12 @@ const App: React.FC = () => {
   const [activeDiff, setActiveDiff] = useState<FileDiff | null>(null);
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [filesDrawerVisible, setFilesDrawerVisible] = useState(false);
+  const [cursorPos, setCursorPos] = useState<{ line: number; column: number } | null>(null);
   const [sessionRuntime, setSessionRuntime] = useState<Record<string, SessionRuntimeState>>({});
   const activeRuntime = activeSessionId ? sessionRuntime[activeSessionId] : null;
+  // Tracks which sessions have already had an agent-response-based title
+  // attempt, so we don't repeatedly re-check on every data chunk.
+  const agentResponseNamingRef = useRef<Set<string>>(new Set());
 
   const activeFileRef = useRef(activeFile);
   activeFileRef.current = activeFile;
@@ -72,12 +80,15 @@ const App: React.FC = () => {
   sessionsRef.current = sessions;
 
   const isDirty = activeFile ? activeFile.content !== savedContent : false;
-  isDirtyRef.current = isDirty;
 
   const persist = useCallback((data: AppData) => {
     setAppData(data);
     saveAppData(data);
   }, []);
+
+  useEffect(() => {
+    isDirtyRef.current = isDirty;
+  }, [isDirty]);
 
   const updateSessionRuntime = useCallback((sessionId: string, update: Partial<SessionRuntimeState>) => {
     setSessionRuntime((prev) => {
@@ -367,8 +378,13 @@ const App: React.FC = () => {
       let current = { ...appData };
       const existingProject = current.projects.find((p) => p.rootPath === result.rootPath);
       let projectId: string;
-      if (existingProject) { projectId = existingProject.id; existingProject.openedAt = Date.now(); }
-      else { projectId = generateId(); current.projects = [...current.projects, { id: projectId, name: result.projectName, rootPath: result.rootPath, openedAt: Date.now() }]; }
+      if (existingProject) {
+        projectId = existingProject.id;
+        current.projects = current.projects.map((p) => p.id === projectId ? { ...p, openedAt: Date.now() } : p);
+      } else {
+        projectId = generateId();
+        current.projects = [...current.projects, { id: projectId, name: result.projectName, rootPath: result.rootPath, openedAt: Date.now() }];
+      }
       current.activeProjectId = projectId;
       persist(current);
 
@@ -418,7 +434,7 @@ const App: React.FC = () => {
 
   const handleFileSelect = useCallback(async (node: FileNode) => {
     if (node.type === 'directory') return;
-    setActiveDiff(null); setIsLoading(true);
+    setActiveDiff(null);
     try {
       const ext = node.name.split('.').pop()?.toLowerCase() ?? '';
       const imageExts = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svg']);
@@ -433,6 +449,7 @@ const App: React.FC = () => {
         }
         return;
       }
+      setIsLoading(true);
       const result = await window.electronAPI.readFile(node.path);
       setActiveFile({ name: node.name, path: result.filePath, content: result.content, language: result.language });
       setSavedContent(result.content);
@@ -445,14 +462,16 @@ const App: React.FC = () => {
     setActiveFile((prev) => prev ? { ...prev, content: newContent } : prev);
   }, []);
 
+  const handleCursorChange = useCallback((pos: { line: number; column: number }) => {
+    setCursorPos(pos);
+  }, []);
+
   const handleChangedFileClick = useCallback(async (evt: FileChangeEvent) => {
     if (!activeSessionId) return;
-    setIsLoading(true);
     try {
       const diff = await window.electronAPI.getFileDiff(activeSessionId, evt.path);
       if (diff) setActiveDiff(diff);
     } catch (err) { console.error('Failed to get file diff:', err); }
-    finally { setIsLoading(false); }
   }, [activeSessionId]);
 
   const handleCloseFile = useCallback(() => {
@@ -472,18 +491,46 @@ const App: React.FC = () => {
     const remainingSessions = sessions.filter((s) => s.projectId !== projectId);
     setSessions(remainingSessions);
     const updatedProjects = appData.projects.filter((p) => p.id !== projectId);
-    const newActiveId = projectId === activeProjectId ? (updatedProjects.length > 0 ? updatedProjects[0].id : null) : activeProjectId;
+    const isRemovingActive = projectId === activeProjectId;
+    const newActiveId = isRemovingActive ? (updatedProjects.length > 0 ? updatedProjects[0].id : null) : activeProjectId;
     const newData: AppData = { projects: updatedProjects, activeProjectId: newActiveId };
-    setAppData(newData); saveAppData(newData);
-    if (projectId === activeProjectId) {
-      if (newActiveId) handleSelectProject(updatedProjects.find((p) => p.id === newActiveId)!);
-      else { setActiveSessionId(null); setHasProject(false); setRootPath(null); setRootTree(null); setProjectName(null); setActiveFile(null); setSavedContent(''); setActiveDiff(null); }
+    persist(newData);
+    if (isRemovingActive) {
+      if (newActiveId) {
+        const nextProject = updatedProjects.find((p) => p.id === newActiveId);
+        if (nextProject) {
+          try {
+            const result = await window.electronAPI.openProjectPath(nextProject.rootPath);
+            if (result.success && result.rootPath) {
+              setProjectName(result.projectName ?? nextProject.name);
+              setRootPath(result.rootPath);
+              setRootTree(result.tree ?? null);
+              setHasProject(true);
+              setActiveFile(null); setSavedContent(''); setActiveDiff(null);
+              setFilesDrawerVisible(false);
+              agentHasRunRef.current = false;
+              const projectSessions = sessionsRef.current.filter((s) => s.projectId === nextProject.id);
+              const cached = activeSessionByProjectIdRef.current[nextProject.id];
+              const targetId = (cached && projectSessions.some((s) => s.id === cached)) ? cached : projectSessions.length > 0 ? projectSessions[projectSessions.length - 1].id : null;
+              setActiveSessionId(targetId);
+              if (targetId) activeSessionByProjectIdRef.current[nextProject.id] = targetId;
+              setGitStatus(null);
+              refreshGitStatus();
+              attachFsChangeListener();
+              await reconcileAgentStatus();
+            }
+          } catch (err) { console.error('Failed to switch to next project:', err); }
+        }
+      } else {
+        setActiveSessionId(null); setHasProject(false); setRootPath(null); setRootTree(null); setProjectName(null); setActiveFile(null); setSavedContent(''); setActiveDiff(null);
+        cleanAllListeners();
+      }
     }
-  }, [projects, activeProjectId, sessions, appData, handleSelectProject]);
+  }, [sessions, appData, activeProjectId, persist, refreshGitStatus, reconcileAgentStatus, attachFsChangeListener, cleanAllListeners]);
 
   const handleOpenFile = useCallback(async (filePath: string) => {
-    setIsLoading(true);
     try {
+      setIsLoading(true);
       const result = await window.electronAPI.readFile(filePath);
       setActiveFile({ name: filePath.split(/[\\/]/).pop() || 'untitled', path: result.filePath, content: result.content, language: result.language });
       setSavedContent(result.content); setActiveDiff(null);
@@ -501,6 +548,58 @@ const App: React.FC = () => {
   const handleRenameSession = useCallback((sessionId: string, newLabel: string) => {
     setSessions((prev) => prev.map((s) => s.id === sessionId ? { ...s, label: newLabel, renamedFromPrompt: true, updatedAt: Date.now() } : s));
   }, []);
+
+  /**
+   * Auto-rename a session if (a) the user hasn't manually renamed it, and
+   * (b) the proposed label is non-empty. Performs deduplication against
+   * sibling session titles so two chats don't end up with identical labels.
+   */
+  const autoRenameSession = useCallback((sessionId: string, proposedLabel: string) => {
+    if (!proposedLabel) return;
+    setSessions((prev) => {
+      const target = prev.find((s) => s.id === sessionId);
+      if (!target) return prev;
+      if (!isDefaultLabel(target.label)) return prev;
+      const siblings = prev.filter((s) => s.id !== sessionId).map((s) => s.label);
+      const unique = deduplicateTitle(proposedLabel, siblings);
+      if (unique === target.label) return prev;
+      return prev.map((s) => s.id === sessionId ? { ...s, label: unique, renamedFromPrompt: true, updatedAt: Date.now() } : s);
+    });
+  }, []);
+
+  /**
+   * Once a session's agent has produced enough output, try to extract a
+   * useful title from the agent's first response. Runs at most once per
+   * session (tracked via `agentResponseNamingRef`) and only when the
+   * session's current label is still a default ("Chat N" / "Untitled").
+   *
+   * The 200-char threshold is empirical: most agents echo a 1–2 sentence
+   * summary near the top of their reply within the first 100–300 bytes.
+   * Waiting longer would be more accurate but delays the rename.
+   */
+  useEffect(() => {
+    if (!sessions.length) return;
+    for (const sess of sessions) {
+      if (agentResponseNamingRef.current.has(sess.id)) continue;
+      const rt = sessionRuntime[sess.id];
+      if (!rt) continue;
+      // Only attempt once the agent has produced enough output
+      if (rt.terminalBuffer.length < 200) continue;
+      // Only attempt if the user hasn't already manually or auto-named it
+      if (!isDefaultLabel(sess.label)) {
+        agentResponseNamingRef.current.add(sess.id);
+        continue;
+      }
+      const title = buildContextualTitle({
+        projectName,
+        agentResponse: rt.terminalBuffer,
+      });
+      if (title) {
+        autoRenameSession(sess.id, title);
+      }
+      agentResponseNamingRef.current.add(sess.id);
+    }
+  }, [sessionRuntime, sessions, projectName, autoRenameSession]);
 
   const handleAddToContext = useCallback(async (node: FileNode) => {
     if (!activeSessionId || !rootPath) {
@@ -598,9 +697,102 @@ const App: React.FC = () => {
   const showEditor = !!activeFile || !!activeDiff;
   const rightDockOpen = filesDrawerVisible || showEditor;
   const [dockResizeTick, setDockResizeTick] = useState(0);
+  const appMainRef = useRef<HTMLDivElement>(null);
+  const rightDockRef = useRef<HTMLDivElement>(null);
+  const dockTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dockTransitioningRef = useRef(false);
   const prevDockOpenRef = useRef(rightDockOpen);
+
+  // Compute and apply the right-dock's target width as a CSS variable on app-main.
+  // This lets the agent-region's grid column transition smoothly to its new size.
   useEffect(() => {
-    if (rightDockOpen !== prevDockOpenRef.current) { prevDockOpenRef.current = rightDockOpen; setDockResizeTick((t) => t + 1); }
+    const el = rightDockRef.current;
+    const main = appMainRef.current;
+    if (!el || !main) return;
+
+    // Measure the dock's content width (sum of visible dock-pane widths)
+    const measure = () => {
+      let total = 0;
+      el.querySelectorAll<HTMLElement>('.dock-pane').forEach((pane) => {
+        const rect = pane.getBoundingClientRect();
+        if (rect.width > 0) total += rect.width;
+      });
+      return total;
+    };
+
+    const apply = () => {
+      const width = rightDockOpen ? measure() : 0;
+      const prev = main.style.getPropertyValue('--right-dock-width').trim();
+      const next = `${width}px`;
+      if (prev !== next) {
+        cliDebug.log('dock:widthChange', { from: prev || '0px', to: next });
+      }
+      main.style.setProperty('--right-dock-width', next);
+    };
+
+    // Initial measurement
+    apply();
+
+    // Re-measure when content changes (e.g. opening files changes which dock-pane is visible)
+    const observer = new ResizeObserver(() => apply());
+    observer.observe(el);
+    el.querySelectorAll<HTMLElement>('.dock-pane').forEach((pane) => observer.observe(pane));
+
+    return () => observer.disconnect();
+  }, [rightDockOpen, filesDrawerVisible, showEditor, activeFile, activeDiff]);
+
+  // When the dock open state changes, wait for the CSS grid transition to finish
+  // before telling AgentPanel to refit xterm. This avoids rewrapping the terminal
+  // mid-transition (which is what causes the "refresh" feel).
+  useEffect(() => {
+    if (rightDockOpen === prevDockOpenRef.current) return;
+    prevDockOpenRef.current = rightDockOpen;
+
+    cliDebug.log('dock:stateChange', { open: rightDockOpen });
+
+    if (dockTransitionTimeoutRef.current) {
+      clearTimeout(dockTransitionTimeoutRef.current);
+      dockTransitionTimeoutRef.current = null;
+    }
+
+    const main = appMainRef.current;
+    if (!main) {
+      cliDebug.log('dock:noMain', { open: rightDockOpen });
+      setDockResizeTick((t) => t + 1);
+      return;
+    }
+
+    // Mark the dock as transitioning so AgentPanel's syncResize skips mid-transition refits.
+    // This is what makes the CLI feel stable (no per-frame rewrap) while the dock slides in/out.
+    dockTransitioningRef.current = true;
+    main.classList.add('is-dock-transitioning');
+    cliDebug.mark('dock:transitionStart');
+
+    const onTransitionEnd = (e: TransitionEvent) => {
+      // Only react to the column transition on app-main
+      if (e.propertyName !== 'grid-template-columns') return;
+      main.removeEventListener('transitionend', onTransitionEnd);
+      if (dockTransitionTimeoutRef.current) {
+        clearTimeout(dockTransitionTimeoutRef.current);
+        dockTransitionTimeoutRef.current = null;
+      }
+      dockTransitioningRef.current = false;
+      main.classList.remove('is-dock-transitioning');
+      cliDebug.mark('dock:transitionEnd');
+      setDockResizeTick((t) => t + 1);
+    };
+
+    main.addEventListener('transitionend', onTransitionEnd);
+
+    // Safety: if the transition is interrupted or doesn't fire, still refit eventually
+    dockTransitionTimeoutRef.current = setTimeout(() => {
+      main.removeEventListener('transitionend', onTransitionEnd);
+      dockTransitionTimeoutRef.current = null;
+      dockTransitioningRef.current = false;
+      main.classList.remove('is-dock-transitioning');
+      cliDebug.mark('dock:transitionSafetyTimeout');
+      setDockResizeTick((t) => t + 1);
+    }, 220);
   }, [rightDockOpen]);
 
   return (
@@ -617,7 +809,7 @@ const App: React.FC = () => {
           onOpenFolder={handleOpenFolder}
           onRemoveProject={handleRemoveProject} />
 
-        <div className="app-main">
+        <div className="app-main" ref={appMainRef}>
           {hasProject && !activeSessionId && (
             <div className="app-no-session">
               <div className="app-no-session-icon"><MessageSquarePlus size={40} /></div>
@@ -633,6 +825,7 @@ const App: React.FC = () => {
                 error={activeRuntime?.error ?? ''} changedFiles={activeRuntime?.changedFiles ?? []}
                 terminalBuffer={activeRuntime?.terminalBuffer ?? ''} restartCount={activeRuntime?.restartCount ?? 0}
                 resizeSignal={dockResizeTick}
+                dockTransitioningRef={dockTransitioningRef}
                 hasProject={hasProject} sessionLabel={activeSession?.label ?? null}
                 onRenameSession={handleRenameSession}
                 onWrite={(input) => handleWriteAgent(activeSessionId, input)}
@@ -642,46 +835,49 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {rightDockOpen && (
-            <div className="right-dock">
-              {filesDrawerVisible && (
-                <div className="dock-pane files-dock-pane">
-                  <FilesDrawer visible={true} projectName={hasProject ? (projectName || '') : null}
-                    rootTree={rootTree} activeFilePath={activeFile?.path || ''}
-                    onClose={() => setFilesDrawerVisible(false)} onFileSelect={handleFileSelect}
-                    onRefreshTree={handleRefreshTree} onOpenFolder={handleOpenFolder}
-                    onCloseActiveFile={handleCloseFile} onPaste={handlePaste}
-                    onAddToContext={handleAddToContext} />
-                </div>
-              )}
+          <div
+            ref={rightDockRef}
+            className={`right-dock${rightDockOpen ? '' : ' collapsed'}`}
+          >
+            {filesDrawerVisible && (
+              <div className="dock-pane files-dock-pane">
+                <FilesDrawer visible={true} projectName={hasProject ? (projectName || '') : null}
+                  rootTree={rootTree} activeFilePath={activeFile?.path || ''}
+                  onClose={() => setFilesDrawerVisible(false)} onFileSelect={handleFileSelect}
+                  onRefreshTree={handleRefreshTree} onOpenFolder={handleOpenFolder}
+                  onCloseActiveFile={handleCloseFile} onPaste={handlePaste}
+                  onAddToContext={handleAddToContext} />
+              </div>
+            )}
 
-              {showEditor && (
-                <div className="dock-pane code-dock-pane">
-                  {activeDiff ? (
-                    <DiffViewer diff={activeDiff} onClose={() => setActiveDiff(null)} onOpenFile={handleOpenFile} />
-                  ) : activeFile?.language === 'image' ? (
-                    <div className="image-preview-pane">
-                      <div className="code-review-tabs" style={{ flexShrink: 0 }}>
-                        <div className="code-review-tab active"><span className="tab-name">{activeFile.name}</span></div>
-                        <div className="code-review-tab-actions">
-                          <button className="agent-action-btn" onClick={handleCloseFile} title="Close"><X size={14} /></button>
-                        </div>
+            {showEditor && (
+              <div className="dock-pane code-dock-pane">
+                {activeDiff ? (
+                  <DiffViewer diff={activeDiff} onClose={() => setActiveDiff(null)} onOpenFile={handleOpenFile} />
+                ) : activeFile?.language === 'image' ? (
+                  <div className="image-preview-pane">
+                    <div className="code-review-tabs" style={{ flexShrink: 0 }}>
+                      <div className="code-review-tab active"><span className="tab-name">{activeFile.name}</span></div>
+                      <div className="code-review-tab-actions">
+                        <button className="agent-action-btn" onClick={handleCloseFile} title="Close"><X size={14} /></button>
                       </div>
-                      <img src={activeFile.content} alt={activeFile.name} className="image-preview-img" />
-                      <div className="image-preview-info">{activeFile.name}</div>
                     </div>
-                  ) : (
-                    <Editor file={activeFile} isLoading={isLoading} isDirty={isDirty} hasProject={hasProject}
-                      onChange={handleEditorChange} onSave={handleSave} onClose={handleCloseFile} />
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+                    <img src={activeFile.content} alt={activeFile.name} className="image-preview-img" />
+                    <div className="image-preview-info">{activeFile.name}</div>
+                  </div>
+                ) : (
+                  <Editor file={activeFile} isLoading={isLoading} isDirty={isDirty} hasProject={hasProject}
+                    onChange={handleEditorChange} onSave={handleSave} onClose={handleCloseFile} onCursorChange={handleCursorChange} />
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
       <BottomBar projectName={hasProject ? (projectName || '') : null} fileName={activeFile?.name || ''}
-        language={activeFile?.language || ''} saveStatus={saveStatus} branch={gitStatus?.isRepo ? gitStatus.branch : null} />
+        language={activeFile?.language || ''} saveStatus={saveStatus} branch={gitStatus?.isRepo ? gitStatus.branch : null}
+        cursor={cursorPos} />
+      <CliDebugOverlay />
     </div>
   );
 };

@@ -18,7 +18,11 @@
     "start": "electron .",
     "preview": "vite preview",
     "package": "npm run build && electron-builder --win --dir",
-    "dist": "npm run build && electron-builder --win"
+    "dist": "npm run build && electron-builder --win",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit"
   },
   "build": {
     "appId": "ai.termina.app",
@@ -56,15 +60,21 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "@vitest/ui": "^4.1.9",
     "concurrently": "^9.0.1",
     "cross-env": "^7.0.3",
     "electron": "^33.2.1",
     "electron-builder": "^26.15.3",
+    "jsdom": "^29.1.1",
     "typescript": "^5.6.3",
     "vite": "^6.0.1",
+    "vitest": "^4.1.9",
     "wait-on": "^8.0.1"
   }
 }

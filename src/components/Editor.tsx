@@ -12,6 +12,7 @@ interface EditorPanelProps {
   onChange: (content: string | undefined) => void;
   onSave: () => void;
   onClose: () => void;
+  onCursorChange?: (pos: { line: number; column: number }) => void;
 }
 
 const extIcons: Record<string, React.ReactNode> = {
@@ -33,11 +34,14 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
   onChange,
   onSave,
   onClose,
+  onCursorChange,
 }) => {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const applyingExternalChangeRef = useRef(false);
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
+  const onCursorChangeRef = useRef(onCursorChange);
+  onCursorChangeRef.current = onCursorChange;
 
   const handleMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
@@ -49,6 +53,15 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
         onSaveRef.current();
       },
     });
+
+    if (onCursorChangeRef.current) {
+      const emit = () => {
+        const p = editor.getPosition();
+        if (p) onCursorChangeRef.current?.({ line: p.lineNumber, column: p.column });
+      };
+      editor.onDidChangeCursorPosition(emit);
+      emit();
+    }
   }, []);
 
   // Live reload: sync Monaco model when file content changes from outside
@@ -100,40 +113,34 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
         </div>
       </div>
       <div className="editor-main">
-        {isLoading ? (
-          <div className="editor-loading">
-            <span>Loading file...</span>
-          </div>
-        ) : (
-          <Editor
-            key={file.path}
-            height="100%"
-            language={file.language}
-            defaultValue={file.content}
-            onChange={handleChange}
-            onMount={handleMount}
-            theme="vs-dark"
-            options={{
-              fontSize: 13,
-              fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-              minimap: { enabled: true, scale: 1, showSlider: 'mouseover' },
-              scrollBeyondLastLine: false,
-              lineNumbers: 'on',
-              renderLineHighlight: 'line',
-              smoothScrolling: true,
-              cursorBlinking: 'smooth',
-              cursorSmoothCaretAnimation: 'on',
-              bracketPairColorization: { enabled: true },
-              padding: { top: 12 },
-              automaticLayout: true,
-            }}
-            loading={
-              <div className="editor-loading">
-                <span>Loading editor...</span>
-              </div>
-            }
-          />
-        )}
+        <Editor
+          key={file.path}
+          height="100%"
+          language={file.language}
+          defaultValue={file.content ?? ''}
+          onChange={handleChange}
+          onMount={handleMount}
+          theme="vs-dark"
+          options={{
+            fontSize: 13,
+            fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+            minimap: { enabled: true, scale: 1, showSlider: 'mouseover' },
+            scrollBeyondLastLine: false,
+            lineNumbers: 'on',
+            renderLineHighlight: 'line',
+            smoothScrolling: true,
+            cursorBlinking: 'smooth',
+            cursorSmoothCaretAnimation: 'on',
+            bracketPairColorization: { enabled: true },
+            padding: { top: 12 },
+            automaticLayout: true,
+          }}
+          loading={
+            <div className="editor-loading">
+              <span>{isLoading ? 'Loading file...' : 'Loading editor...'}</span>
+            </div>
+          }
+        />
       </div>
     </div>
   );

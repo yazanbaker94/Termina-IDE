@@ -3,6 +3,8 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { AlertTriangle, FilePlus, FileEdit, FileMinus, ChevronDown, ChevronRight, X, ClipboardPaste, Copy } from 'lucide-react';
 import { FileChangeEvent, AgentStatus } from '../types';
+import { cliDebug } from '../debug/cliDebug';
+import { extractTitleFromPrompt, isDefaultLabel, buildContextualTitle } from '../utils/sessionNaming';
 
 interface AgentPanelProps {
   sessionId: string;
@@ -13,6 +15,7 @@ interface AgentPanelProps {
   terminalBuffer: string;
   restartCount: number;
   resizeSignal: number;
+  dockTransitioningRef?: React.MutableRefObject<boolean>;
   hasProject: boolean;
   sessionLabel: string | null;
   onRenameSession: (sessionId: string, newLabel: string) => void;
@@ -29,22 +32,6 @@ function changeIcon(changeType: string) {
     case 'deleted': return <FileMinus size={12} />;
     default: return <FileEdit size={12} />;
   }
-}
-
-function buildChatTitle(prompt: string): string {
-  const clean = prompt.replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
-  if (clean.length < 8) return '';
-  const words = clean.split(' ').filter((w) => w.length > 0);
-  if (words.length < 2) return '';
-  const knownNoise = new Set(['?', '/help', 'help', 'exit', 'clear', 'cls', 'ls', 'dir', 'pwd', 'cd', 'whoami']);
-  if (knownNoise.has(words[0].toLowerCase())) return '';
-  const meaningful = words.slice(0, 7);
-  let title = meaningful.join(' ');
-  if (title.length > 42) {
-    title = title.slice(0, 42).replace(/\s\S*$/, '');
-  }
-  title = title.charAt(0).toUpperCase() + title.slice(1);
-  return title || '';
 }
 
 function normalizeTerminalPaste(text: string): string {
@@ -71,6 +58,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   terminalBuffer,
   restartCount,
   resizeSignal,
+  dockTransitioningRef,
   hasProject,
   sessionLabel,
   onRenameSession,
@@ -83,6 +71,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resizeRafRef = useRef<number | null>(null);
   const [changesExpanded, setChangesExpanded] = useState(false);
   const [termMenu, setTermMenu] = useState<{ x: number; y: number } | null>(null);
   const inputLineRef = useRef('');
@@ -91,6 +80,16 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
 
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
+
+  // Keep latest buffer available to initTerminal without making it re-create
+  const terminalBufferRef = useRef(terminalBuffer);
+  terminalBufferRef.current = terminalBuffer;
+  const onXtermWriteReadyRef = useRef(onXtermWriteReady);
+  onXtermWriteReadyRef.current = onXtermWriteReady;
+  const onWriteRef = useRef(onWrite);
+  onWriteRef.current = onWrite;
+  const onRenameSessionRef = useRef(onRenameSession);
+  onRenameSessionRef.current = onRenameSession;
 
   const isOwnAgentRunning = status === 'running';
 
@@ -104,19 +103,54 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     ? 'Error'
     : 'Idle';
 
+  const lastSentSizeRef = useRef<{ cols: number; rows: number } | null>(null);
+
   const syncResize = useCallback(() => {
     if (!terminalRef.current || !fitAddonRef.current) return;
-    try {
-      fitAddonRef.current.fit();
-      const cols = terminalRef.current.cols;
-      const rows = terminalRef.current.rows;
-      if (cols > 0 && rows > 0) {
+    if (resizeRafRef.current !== null) return;
+    // Skip mid-transition refits. While the right-dock is sliding in/out,
+    // the agent-region's width is changing on every frame and calling
+    // term.resize() would rewrap the buffer repeatedly — that's the
+    // "CLI restarts for a sec" feel. We refit once, at the end of the
+    // transition, via the resizeSignal prop.
+    if (dockTransitioningRef?.current) {
+      cliDebug.log('terminal:fitSkipped', { sessionId, reason: 'dockTransitioning' });
+      return;
+    }
+    cliDebug.log('terminal:fitRequested', { sessionId });
+    resizeRafRef.current = requestAnimationFrame(() => {
+      resizeRafRef.current = null;
+      if (!terminalRef.current || !fitAddonRef.current) return;
+      try {
+        const term = terminalRef.current;
+        const proposed = fitAddonRef.current.proposeDimensions();
+        if (!proposed || !proposed.cols || !proposed.rows) {
+          return;
+        }
+        const cols = proposed.cols;
+        const rows = proposed.rows;
+        const fromCols = term.cols;
+        const fromRows = term.rows;
+        if (fromCols === cols && fromRows === rows) {
+          cliDebug.log('terminal:fitNoop', { sessionId, cols, rows });
+          return;
+        }
+        term.resize(cols, rows);
+        cliDebug.log('terminal:resize', { sessionId, fromCols, fromRows, toCols: cols, toRows: rows });
+        const last = lastSentSizeRef.current;
+        const isSmallColumnChange = last && Math.abs(last.cols - cols) <= 1 && last.rows === rows;
+        if (isSmallColumnChange) {
+          return;
+        }
+        lastSentSizeRef.current = { cols, rows };
         if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
         resizeTimerRef.current = setTimeout(() => {
-          window.electronAPI.resizeAgent(sessionId, cols, rows);
-        }, 100);
-      }
-    } catch (_) {}
+          const t = terminalRef.current;
+          if (!t) return;
+          window.electronAPI.resizeAgent(sessionId, t.cols, t.rows);
+        }, 120);
+      } catch (_) {}
+    });
   }, [sessionId]);
 
   const focusTerminal = useCallback(() => {
@@ -134,9 +168,9 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
       if (ch === '\r' || ch === '\n') {
         const line = inputLineRef.current;
         inputLineRef.current = '';
-        if (line.length >= 8 && !renamedRef.current && sessionLabel && /^Chat \d+$/.test(sessionLabel)) {
-          const title = buildChatTitle(line);
-          if (title.length > 0 && title !== 'Chat') {
+        if (!renamedRef.current && isDefaultLabel(sessionLabel) && line.length > 0) {
+          const title = extractTitleFromPrompt(line);
+          if (title.length > 0) {
             renamedRef.current = true;
             onRenameSession(sessionId, title);
           }
@@ -178,6 +212,31 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     focusTerminal();
   }, [sendTerminalInput, focusTerminal]);
 
+  const performTerminalPaste = useCallback(async () => {
+    let text = '';
+    try {
+      if (typeof navigator?.clipboard?.readText === 'function') {
+        text = await navigator.clipboard.readText();
+      }
+    } catch {}
+    if (!text) {
+      try { text = await window.electronAPI.readClipboardText(); } catch {}
+    }
+    if (!text) return;
+    const normalized = normalizeTerminalPaste(text);
+    if (!normalized) return;
+    sendTerminalInput(normalized, 'keyboard-paste');
+    focusTerminal();
+  }, [sendTerminalInput, focusTerminal]);
+
+  const performTerminalCopy = useCallback(async () => {
+    if (!terminalRef.current) return;
+    const sel = terminalRef.current.getSelection();
+    if (!sel) return false;
+    try { await window.electronAPI.writeClipboardText(sel); } catch { return false; }
+    return true;
+  }, []);
+
   const contextMenuPaste = useCallback(async () => {
     let text = '';
     try {
@@ -195,9 +254,20 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     focusTerminal();
   }, [sendTerminalInput, focusTerminal]);
 
+  // Refs to the latest handler functions so initTerminal stays stable
+  const performTerminalPasteRef = useRef(performTerminalPaste);
+  performTerminalPasteRef.current = performTerminalPaste;
+  const performTerminalCopyRef = useRef(performTerminalCopy);
+  performTerminalCopyRef.current = performTerminalCopy;
+  const sendTerminalInputRef = useRef(sendTerminalInput);
+  sendTerminalInputRef.current = sendTerminalInput;
+
   const initTerminal = useCallback(() => {
     if (!containerRef.current) return;
+    const bufferLen = terminalBufferRef.current?.length ?? 0;
+    cliDebug.log('terminal:initStart', { sessionId, bufferLen });
     containerRef.current.innerHTML = '';
+    cliDebug.log('terminal:innerHTMLCleared', { sessionId });
 
     const term = new Terminal({
       fontSize: 11,
@@ -219,31 +289,79 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
     term.open(containerRef.current);
     term.focus();
 
-    if (terminalBuffer) {
-      term.write(terminalBuffer);
+    const pasteHandler = performTerminalPasteRef.current;
+    const copyHandler = performTerminalCopyRef.current;
+    const sendHandler = sendTerminalInputRef.current;
+
+    term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      if (e.type !== 'keydown') return true;
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return true;
+      const key = e.key.toLowerCase();
+      if (key === 'v' && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        void pasteHandler();
+        return false;
+      }
+      if (key === 'c' && !e.shiftKey && !e.altKey) {
+        const sel = term.getSelection();
+        if (sel && sel.length > 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          void copyHandler();
+          return false;
+        }
+      }
+      if (key === 'insert' && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        void pasteHandler();
+        return false;
+      }
+      return true;
+    });
+
+    if (terminalBufferRef.current) {
+      term.write(terminalBufferRef.current);
+      cliDebug.log('terminal:bufferWritten', { sessionId, len: terminalBufferRef.current.length });
     }
 
     setTimeout(() => syncResize(), 50);
 
     term.onData((data: string) => {
-      sendTerminalInput(data, 'xterm-data');
+      sendHandler(data, 'xterm-data');
     });
 
     terminalRef.current = term;
     fitAddonRef.current = fitAddon;
+    cliDebug.log('terminal:initDone', { sessionId });
 
-    onXtermWriteReady(sessionId, (data: string) => {
-      if (terminalRef.current) terminalRef.current.write(data);
+    onXtermWriteReadyRef.current(sessionId, (data: string) => {
+      if (terminalRef.current) {
+        terminalRef.current.write(data);
+        // Log write bursts from the live data stream (sampled, not every chunk)
+        cliDebug.log('terminal:dataWrite', { sessionId, len: data.length });
+      }
     });
-  }, [onXtermWriteReady, sessionId, syncResize, terminalBuffer, sendTerminalInput]);
+  }, [sessionId, syncResize]);
 
   const destroyTerminal = useCallback(() => {
     if (terminalRef.current) {
+      cliDebug.log('terminal:dispose', { sessionId });
       try { terminalRef.current.dispose(); } catch (_) {}
       terminalRef.current = null;
       fitAddonRef.current = null;
     }
-  }, []);
+    if (resizeRafRef.current !== null) {
+      cancelAnimationFrame(resizeRafRef.current);
+      resizeRafRef.current = null;
+    }
+    if (resizeTimerRef.current) {
+      clearTimeout(resizeTimerRef.current);
+      resizeTimerRef.current = null;
+    }
+  }, [sessionId]);
 
   const copyTerminalSelection = useCallback(async () => {
     if (!terminalRef.current) return;
@@ -277,10 +395,15 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   }, [termMenu]);
 
   useEffect(() => {
+    cliDebug.log('terminal:effectRun', { sessionId, restartCount });
     onXtermWriteReady(sessionId, null);
     destroyTerminal();
     if (containerRef.current) initTerminal();
-    return () => { onXtermWriteReady(sessionId, null); destroyTerminal(); };
+    return () => {
+      cliDebug.log('terminal:effectCleanup', { sessionId });
+      onXtermWriteReady(sessionId, null);
+      destroyTerminal();
+    };
   }, [sessionId, restartCount]);
 
   useEffect(() => {
@@ -290,20 +413,36 @@ const AgentPanel: React.FC<AgentPanelProps> = ({
   }, [isOwnAgentRunning, focusTerminal]);
 
   useEffect(() => {
+    cliDebug.log('terminal:resizeSignalEffect', { sessionId, resizeSignal });
     requestAnimationFrame(() => syncResize());
     const t = setTimeout(() => syncResize(), 100);
     return () => clearTimeout(t);
-  }, [resizeSignal, syncResize]);
+  }, [resizeSignal, syncResize, sessionId]);
 
   useEffect(() => {
-    const handleResize = () => syncResize();
+    let pendingRaf: number | null = null;
+    const handleResize = () => {
+      if (pendingRaf !== null) return;
+      pendingRaf = requestAnimationFrame(() => {
+        pendingRaf = null;
+        syncResize();
+      });
+    };
     window.addEventListener('resize', handleResize);
-    const observer = new ResizeObserver(() => syncResize());
+    const observer = new ResizeObserver(() => {
+      if (pendingRaf !== null) return;
+      pendingRaf = requestAnimationFrame(() => {
+        pendingRaf = null;
+        syncResize();
+      });
+    });
     if (containerRef.current) observer.observe(containerRef.current);
     return () => {
       window.removeEventListener('resize', handleResize);
       observer.disconnect();
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+      if (resizeRafRef.current !== null) cancelAnimationFrame(resizeRafRef.current);
+      if (pendingRaf !== null) cancelAnimationFrame(pendingRaf);
     };
   }, [syncResize]);
 

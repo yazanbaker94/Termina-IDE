@@ -56,21 +56,33 @@ body {
   display: flex;
   flex: 1;
   min-height: 0;
+  contain: layout;
 }
 
 .app-main {
-  display: flex;
+  display: grid;
   flex: 1;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
+  contain: layout;
+  grid-template-columns: minmax(0, 1fr) var(--right-dock-width, 0px);
+  transition: grid-template-columns 0.15s cubic-bezier(0.2, 0, 0, 1);
 }
 
+/* The .is-dock-transitioning class is added to .app-main while the right-dock
+   is animating open/closed. AgentPanel reads the corresponding ref to skip
+   mid-transition xterm refits — this prevents the "CLI restarts for a sec"
+   feel caused by repeated term.resize() calls as the agent-region's width
+   changes on every animation frame. */
+
 .agent-region {
-  flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  contain: layout;
 }
 
 .agent-region .agent-panel {
@@ -81,8 +93,21 @@ body {
 .right-dock {
   display: flex;
   align-items: stretch;
-  flex-shrink: 0;
   overflow: hidden;
+  contain: layout;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+.right-dock .dock-pane {
+  /* When the dock is collapsed (width 0), the inner panes are hidden
+     so they don't intercept clicks or remain focusable. */
+}
+
+.right-dock.collapsed .dock-pane {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .dock-pane {
@@ -91,6 +116,8 @@ body {
   border-left: 1px solid var(--border-subtle);
   background: var(--bg-secondary);
   overflow: hidden;
+  min-height: 0;
+  contain: layout;
 }
 
 .files-dock-pane {

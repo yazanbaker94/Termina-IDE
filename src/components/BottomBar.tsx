@@ -7,9 +7,10 @@ interface BottomBarProps {
   language: string;
   saveStatus: string;
   branch: string | null;
+  cursor?: { line: number; column: number } | null;
 }
 
-const BottomBar: React.FC<BottomBarProps> = ({ projectName, fileName, language, saveStatus, branch }) => {
+const BottomBar: React.FC<BottomBarProps> = ({ projectName, fileName, language, saveStatus, branch, cursor }) => {
   return (
     <div className="bottombar">
       <div className="bottombar-left">
@@ -40,7 +41,7 @@ const BottomBar: React.FC<BottomBarProps> = ({ projectName, fileName, language, 
         )}
         {language && <span className="status-info">{language}</span>}
         <span className="status-info">UTF-8</span>
-        <span className="status-info">Ln 1, Col 1</span>
+        <span className="status-info">Ln {cursor?.line ?? 1}, Col {cursor?.column ?? 1}</span>
       </div>
     </div>
   );
